@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Quorum · sesión deliberante",
+  title: "Acta · sesión de agente",
   description:
     "Una sesión de agente que varias personas ven en vivo. El agente decide cuándo hablar según quién esté mirando.",
 };

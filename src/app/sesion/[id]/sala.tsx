@@ -159,7 +159,7 @@ function Cabecera({
             className="text-acta"
             style={{ fontFamily: "var(--font-acta)", fontWeight: 700 }}
           >
-            Quórum
+            Acta
           </h1>
           <p className="mt-1 text-rotulo uppercase tracking-[0.08em] text-campo-tenue">
             sesión {idSesion} · {transporte} · {conexion}

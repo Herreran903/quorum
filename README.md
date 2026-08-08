@@ -1,4 +1,4 @@
-# Quorum
+# Acta — sesión de agente
 
 Una sesión de agente de IA que varias personas ven en vivo y pueden intervenir.
 
@@ -56,7 +56,7 @@ npx portal login
 ```
 
 ```bash
-npx portal projects create quorum
+npx portal projects create <nombre-del-proyecto>
 ```
 
 ```bash
