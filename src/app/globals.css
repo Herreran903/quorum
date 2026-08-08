@@ -26,34 +26,38 @@
 
 @theme {
   /**
-   * DOS VALORES Y UN SATURADO.
-   * =========================
-   * Es la disciplina de 2xA (casi negro y hueso, cero color) y de Serotoninn
-   * (negro, crema, un solo rojo). El campo oscuro dejó de ser puntuación: es
-   * el espacio donde la máquina trabaja, y tú estás asomado a él.
+   * EL MUNDO: papel cálido del sistema del dueño, y la LUZ como único lujo.
+   * ======================================================================
+   * El color saturado no vive en los componentes: vive en LA VETA — el
+   * shader que cruza la página y que es la presencia de la máquina. La UI
+   * alrededor es tinta sobre papel, como su portafolio.
    *
-   * Ningún negro puro ni gris puro: toda la rampa está tibia, así que la
-   * agrupación emerge de la temperatura y nada se lee como pieza importada.
+   * Nota de nombres: `hueso` es EL PRIMER PLANO (aquí, tinta berenjena
+   * oscura) y `fondo` el campo (papel). Los nombres sobreviven del mundo
+   * oscuro anterior; los valores son los del sistema del dueño.
    */
-  --color-fondo: #0d0d0c;
-  --color-hondo: #080807;
-  --color-hueso: #e8e6e0;
+  --color-fondo: #f5f3ef;
+  --color-hondo: #edeae3;
+  --color-hueso: #241a22;
 
   /**
    * LA JERARQUÍA SE HACE APAGANDO, NO ENCENDIENDO.
-   * Obys deja toda su lista en gris casi ilegible y pone en negro SOLO lo que
-   * estás mirando. Aquí igual: lo ya ocurrido se apaga, lo vivo queda en hueso.
+   * Lo ya ocurrido baja a mina cálida; solo lo vivo queda en tinta plena.
    */
-  --color-pasado: #55534d;
-  --color-tenue: #2a2926;
+  --color-pasado: #8a8078;
+  --color-tenue: #d8d3ca;
 
   /**
-   * EL ÚNICO SATURADO. Solo estado: riesgo, detención, lo que exige mirar.
-   * Es el vino del sistema del dueño, aclarado para sobrevivir al campo oscuro
-   * — su propio portafolio ya hace esa distinción por la misma razón.
-   * Si algo más necesita distinguirse, lo hace por FORMA, no por color.
+   * EL ÚNICO SATURADO DE COMPONENTE. Solo estado: riesgo, detención, lo que
+   * exige mirar. Sobre papel el vino del dueño va pleno, sin aclarar.
    */
-  --color-alarma: #e9818e;
+  --color-alarma: #a02d45;
+
+  /**
+   * EL NEGRO DE REDACCIÓN: más negro que la propia tinta. Lo tachado pesa
+   * más que lo dicho — la censura es tinta aplicada con presión.
+   */
+  --color-redaccion: #12100e;
 
   --font-acta: "Redaction", Georgia, "Times New Roman", serif;
   --font-acta-20: "Redaction 20", Georgia, serif;
@@ -107,7 +111,8 @@ html {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  opacity: 0.05;
+  z-index: 1;
+  opacity: 0.04;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 

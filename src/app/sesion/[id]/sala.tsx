@@ -6,6 +6,7 @@ import { useSesion } from "@/lib/useSesion";
 import type { Paso } from "@/lib/protocolo";
 import { familiaDeConfianza } from "@/lib/tipografia";
 import { quienMira, type Espectador, type Presencia } from "@/lib/transporte";
+import { Veta } from "./veta";
 
 const APODOS = ["ana", "beto", "cami", "dani", "eli", "fran", "gabo", "hugo"];
 
@@ -31,13 +32,22 @@ export function Sala({ idSesion }: { idSesion: string }) {
   const sinVigilancia = s.estado.pasos.filter((p) => p.sinTestigos).length;
   const ultimo = s.estado.pasos.at(-1)?.n;
 
+  const palabra = palabraDeEstado({
+    escribiendo: s.sala.escribiendo,
+    testigos: s.sala.espectadores,
+    preguntando: Boolean(s.preguntaAbierta),
+    corriendo: s.agenteCorriendo,
+  });
+
   return (
-    <main className="grano relative flex min-h-screen flex-col bg-fondo text-hueso">
+    <main className="grano relative flex min-h-screen flex-col text-hueso">
+      {/* la luz va debajo de todo; el contenido, en la capa de tinta */}
+      <Veta estado={palabra as Parameters<typeof Veta>[0]["estado"]} congelada={s.sala.escribiendo} />
       <TintaSucia />
       <Cruces />
 
       {/* ------------------------------------------------ borde superior */}
-      <div className="flex items-start justify-between gap-8 px-8 pt-7">
+      <div className="relative z-10 flex items-start justify-between gap-8 px-8 pt-7">
         <p className="text-servicio uppercase text-pasado">
           {idSesion} · {s.transporte} · {s.conexion}
           {s.fuente && <> · {s.fuente}</>}
@@ -56,28 +66,20 @@ export function Sala({ idSesion }: { idSesion: string }) {
       </div>
 
       {/* ------------------------------- el tablero: la palabra que voltea */}
-      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 px-8 pt-2">
-        <EstadoTablero
-          palabra={palabraDeEstado({
-            escribiendo: s.sala.escribiendo,
-            testigos: s.sala.espectadores,
-            preguntando: Boolean(s.preguntaAbierta),
-            corriendo: s.agenteCorriendo,
-          })}
-          testigos={s.sala.espectadores}
-        />
+      <div className="relative z-10 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 px-8 pt-2">
+        <EstadoTablero palabra={palabra} testigos={s.sala.espectadores} />
         <Censo presencia={s.presencia} />
       </div>
 
       {/* -------------------- el mapa de la sesión: una celda por paso */}
-      <MapaSesion pasos={s.estado.pasos} ultimo={ultimo} className="px-8 pt-5" />
+      <MapaSesion pasos={s.estado.pasos} ultimo={ultimo} className="relative z-10 px-8 pt-5" />
 
       <Mandos s={s} />
 
       {/* ------------------------------------- el canal: lo que hace ahora */}
       {/* Cuelga del mismo borde que la palabra; el aire queda a la derecha,
           donde vive el censo. Peso a las esquinas, no simetría de plantilla. */}
-      <div className="grow px-8 pb-40 pt-10">
+      <div className="relative z-10 grow px-8 pb-40 pt-10">
         <div className="w-full max-w-[46rem]">
           {s.estado.pasos.length === 0 && !s.planeando && (
             <p className="text-servicio uppercase text-pasado">
@@ -308,7 +310,7 @@ function Censo({ presencia }: { presencia: Presencia }) {
 
 function Mandos({ s }: { s: ReturnType<typeof useSesion> }) {
   return (
-    <div className="flex flex-wrap items-center gap-5 px-8 pt-6">
+    <div className="relative z-10 flex flex-wrap items-center gap-5 px-8 pt-6">
       <Accion onClick={s.agenteCorriendo ? s.pararAgente : s.arrancarAgente}>
         {s.agenteCorriendo ? "parar" : "arrancar"}
       </Accion>
@@ -373,13 +375,12 @@ function FilaPaso({
       <span className="min-w-0">
         {tapado ? (
           /*
-           * Sobre papel, censurar es tinta más negra que el texto. Sobre un
-           * campo oscuro eso desaparece: aquí censurar es QUEMAR. El bloque
-           * es hueso, del ancho exacto de la frase que no viste, y el filtro
-           * le ensucia los bordes para que no se lea como cinta digital.
+           * De vuelta en el papel, la censura vuelve a ser lo que era: tinta
+           * MÁS NEGRA que el propio texto, con el ancho exacto de la frase
+           * que no viste, y los bordes sucios de tinta aplicada con presión.
            */
           <span
-            className="inline-block max-w-full select-none bg-hueso align-middle text-transparent"
+            className="inline-block max-w-full select-none bg-redaccion align-middle text-transparent"
             style={{ fontFamily: familiaDeConfianza(paso.confianza), filter: "url(#tinta)" }}
             title="lo hizo sin que nadie mirara"
           >
@@ -478,7 +479,7 @@ function Pie({
   onEnviar: () => void;
 }) {
   return (
-    <footer className="fixed inset-x-0 bottom-0 border-t border-tenue bg-fondo/95 backdrop-blur-sm">
+    <footer className="fixed inset-x-0 bottom-0 z-20 border-t border-tenue bg-fondo/95 backdrop-blur-sm">
       <div className="w-full max-w-[46rem] px-8 py-4">
         {pregunta && (
           <div className="mb-3 border-l border-alarma pl-3">
