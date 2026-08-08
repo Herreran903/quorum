@@ -234,7 +234,13 @@ export class AgenteSimulado {
 
       case "SEGUIR": {
         this.#enElAire = undefined;
-        await this.#publicarPaso({ ...paso, estado: "hecho" });
+        // La marca es lo que hace visible el silencio: sin ella, "avanzó
+        // porque nadie miraba" no se distingue de un paso cualquiera.
+        await this.#publicarPaso({
+          ...paso,
+          estado: "hecho",
+          sinTestigos: sala.espectadores === 0,
+        });
         if (r.volante) await this.#publicarVolante(r.volante);
         return;
       }

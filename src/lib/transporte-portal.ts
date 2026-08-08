@@ -30,7 +30,7 @@ import type {
   Unsubscribe,
 } from "@portalsdk/core";
 
-import type { Cuerpo, Sobre } from "./protocolo";
+import type { Atencion, Cuerpo, Sobre } from "./protocolo";
 import { esEfimero } from "./protocolo";
 import type {
   Desuscribir,
@@ -43,6 +43,13 @@ import type {
 
 /** Tope duro de Portal para `content`. */
 const TOPE_CONTENIDO_BYTES = 2048;
+
+/** Sin anuncio nuevo en este tiempo, la atención ajena se da por caduca. */
+const VIGENCIA_ATENCION_MS = 6000;
+/** Cada cuánto reanuncio mi atención, para que nadie me dé por ido. */
+const PULSO_ATENCION_MS = 2500;
+/** El tecleo se muestrea; los cambios de mirada y presencia no. */
+const THROTTLE_ATENCION_MS = 500;
 
 function mapearEstado(s: ChannelStatus): EstadoConexion {
   switch (s) {
@@ -78,7 +85,24 @@ export class TransportePortal implements Transporte {
 
   #escribiendoHasta = 0;
   #mirandoPaso: number | undefined;
+  #presente = true;
   #cerrado = false;
+
+  /**
+   * Atención ajena, recibida por mensajes EFÍMEROS.
+   *
+   * MEDIDO EN PORTAL 0.1.5: `setMetadata` NO propaga a los demás
+   * participantes. Un cliente ve su propio cambio, pero el resto sigue
+   * viendo la metadata del connect frame. Verificado con dos pestañas
+   * conectadas al mismo canal real.
+   *
+   * Como toda la política depende de saber quién mira, la atención viaja
+   * por el canal como efímero — que es justo para lo que existe: sin orden,
+   * sin historia, sin persistir.
+   */
+  readonly #atenciones = new Map<string, { a: Atencion; at: number }>();
+  #ultimaAtencionEnviada = 0;
+  #pulso: ReturnType<typeof setInterval> | undefined;
 
   constructor(opciones: OpcionesTransporte, apiKey: string) {
     // Modo anónimo: sin `token`, el SDK acuña su propia credencial y la
@@ -104,6 +128,13 @@ export class TransportePortal implements Transporte {
 
     // Primer momento de red del SDK. Antes de esto no hay conexión ni token.
     this.#canal.acquire();
+
+    // Reanuncio periódico: sin él, quien está quieto mirando un paso caduca
+    // y su halo desaparece aunque siga ahí.
+    this.#pulso = setInterval(() => {
+      this.#anunciarAtencion(true);
+      this.#emitirPresencia();
+    }, PULSO_ATENCION_MS);
   }
 
   get yo(): string | undefined {
@@ -164,23 +195,66 @@ export class TransportePortal implements Transporte {
 
   escribiendo(): void {
     if (this.#cerrado) return;
-    this.#escribiendoHasta = Date.now() + 2500;
-    // El SDK ya hace throttle; llamar por tecla es lo esperado.
+    this.#escribiendoHasta = Date.now() + VIGENCIA_ATENCION_MS;
+    // `activity` sí funciona y ya viene con throttle del SDK; se usa además
+    // del efímero porque es la señal nativa de Portal.
     this.#canal.sendTyping();
+    this.#anunciarAtencion();
     this.#emitirPresencia();
   }
 
   mirando(n: number | undefined): void {
     if (this.#cerrado || this.#mirandoPaso === n) return;
     this.#mirandoPaso = n;
-    // La metadata de presencia es presentación, nunca autorización.
-    this.#canal.setMetadata({ mirandoPaso: n ?? null });
+    this.#anunciarAtencion(true);
     this.#emitirPresencia();
+  }
+
+  atender(presente: boolean): void {
+    if (this.#cerrado || this.#presente === presente) return;
+    this.#presente = presente;
+    if (!presente) this.#mirandoPaso = undefined;
+    this.#anunciarAtencion(true);
+    this.#emitirPresencia();
+  }
+
+  /**
+   * Anuncia mi atención al canal como efímero.
+   *
+   * `forzar` salta el throttle: un cambio de mirada o de presencia es un
+   * evento discreto que no se puede perder, mientras que el tecleo sí se
+   * puede muestrear.
+   */
+  #anunciarAtencion(forzar = false): void {
+    if (this.#cerrado) return;
+    const ahora = Date.now();
+    if (!forzar && ahora - this.#ultimaAtencionEnviada < THROTTLE_ATENCION_MS) return;
+    this.#ultimaAtencionEnviada = ahora;
+
+    const atencion: Atencion = {
+      escribiendo: this.#escribiendoHasta > ahora,
+      mirandoPaso: this.#mirandoPaso,
+      presente: this.#presente,
+    };
+
+    // PERSISTENTE, no efímero, a pesar de que conceptualmente es efímero.
+    // MEDIDO EN PORTAL 0.1.5 con dos clientes anónimos DISTINTOS en el mismo
+    // canal: los mensajes persistentes cruzan, pero ni `setMetadata` ni los
+    // efímeros llegan al otro lado. Como toda la política depende de saber
+    // quién mira, se usa la única vía que demostrablemente funciona y se
+    // paga el coste: estos mensajes ensucian la historia del canal.
+    void this.#canal
+      .send({ content: { tipo: "atencion", atencion }, type: "atencion" })
+      .catch((e) => {
+        console.error("[transporte-portal] no pude anunciar atención", e);
+      });
   }
 
   desconectar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
+    if (this.#pulso) clearInterval(this.#pulso);
+    this.#pulso = undefined;
     for (const soltar of this.#sueltas) soltar();
     this.#canal.release();
     this.#escuchasMsg.clear();
@@ -193,6 +267,20 @@ export class TransportePortal implements Transporte {
   #entrante(msg: Message<Cuerpo>): void {
     const sobre = aSobre(msg);
     if (!sobre) return;
+
+    // La atención no es historia: alimenta la presencia y no llega a la UI
+    // como mensaje. Es el sustituto de `setMetadata`, que no propaga.
+    if (sobre.cuerpo.tipo === "atencion") {
+      if (sobre.emisor !== this.#canal.me?.id) {
+        this.#atenciones.set(sobre.emisor, {
+          a: sobre.cuerpo.atencion,
+          at: Date.now(),
+        });
+        this.#emitirPresencia();
+      }
+      return;
+    }
+
     if (this.#vistos.has(sobre.id)) return;
     this.#vistos.add(sobre.id);
     this.#buffer.push(sobre);
@@ -207,6 +295,9 @@ export class TransportePortal implements Transporte {
       const sobre = aSobre(msg);
       if (!sobre) continue;
       this.#vistos.add(sobre.id);
+      // La atención del historial es atención VIEJA: quien la mandó ya no
+      // está mirando eso. Solo cuenta la que llega en vivo.
+      if (sobre.cuerpo.tipo === "atencion") continue;
       this.#buffer.push(sobre);
       this.#repartir(sobre);
     }
@@ -235,17 +326,34 @@ export class TransportePortal implements Transporte {
       return aggregateAPresencia(p);
     }
 
+    const ahora = Date.now();
     const espectadores: Espectador[] = (p as DetailedPresence).participants.map(
       (par) => {
         const soyYo = par.id === yoId;
-        const meta = par.metadata as { mirandoPaso?: number | null } | undefined;
+        if (soyYo) {
+          return {
+            id: par.id,
+            escribiendo: yoEscribe,
+            escribiendoHasta: this.#escribiendoHasta,
+            mirandoPaso: this.#mirandoPaso,
+            presente: this.#presente,
+            soyYo: true,
+          };
+        }
+
+        // La atención ajena viene del efímero, no de la metadata. Si caducó,
+        // el participante sigue conectado pero sin señal: se asume presente
+        // y sin mirar nada, que es lo prudente.
+        const entrada = this.#atenciones.get(par.id);
+        const fresca = entrada && ahora - entrada.at < VIGENCIA_ATENCION_MS;
+        const a = fresca ? entrada.a : undefined;
+
         return {
           id: par.id,
-          escribiendo: soyYo ? yoEscribe : escribiendoAhora.has(par.id),
-          mirandoPaso: soyYo
-            ? this.#mirandoPaso
-            : (meta?.mirandoPaso ?? undefined),
-          soyYo,
+          escribiendo: a?.escribiendo ?? escribiendoAhora.has(par.id),
+          mirandoPaso: a?.mirandoPaso,
+          presente: a?.presente !== false,
+          soyYo: false,
         };
       },
     );

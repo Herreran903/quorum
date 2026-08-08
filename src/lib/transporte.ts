@@ -33,8 +33,18 @@ export interface Espectador {
   escribiendoHasta?: number;
   /** el `n` del paso que está mirando, si lo reportó. */
   mirandoPaso?: number;
+  /**
+   * `false` = cerró los ojos: sigue conectado pero no cuenta como testigo.
+   * Ausente se lee como presente, para tolerar clientes que no lo reportan.
+   */
+  presente?: boolean;
   /** true cuando este espectador soy yo. */
   soyYo: boolean;
+}
+
+/** ¿Este espectador cuenta como testigo? */
+export function esTestigo(e: Espectador): boolean {
+  return e.presente !== false;
 }
 
 /**
@@ -68,18 +78,29 @@ export const PRESENCIA_VACIA: Presencia = {
  */
 export function alguienEscribe(p: Presencia, ahora = Date.now()): boolean {
   return p.espectadores.some((e) => {
-    if (e.soyYo) return false;
+    if (e.soyYo || !esTestigo(e)) return false;
     return e.escribiendoHasta === undefined
       ? e.escribiendo
       : e.escribiendoHasta > ahora;
   });
 }
 
-/** Cuánta gente hay aparte de mí. Lo que la política llama `espectadores`. */
+/**
+ * Cuántos TESTIGOS hay aparte de mí. Lo que la política llama `espectadores`.
+ *
+ * Quien cerró los ojos sigue conectado pero no cuenta: esa es toda la
+ * mecánica de Testigo. Con presencia agregada no hay lista, así que solo
+ * queda el conteo y nadie puede cerrar los ojos.
+ */
 export function otrosEn(p: Presencia): number {
   return p.detallada
-    ? p.espectadores.filter((e) => !e.soyYo).length
+    ? p.espectadores.filter((e) => !e.soyYo && esTestigo(e)).length
     : Math.max(0, p.total - 1);
+}
+
+/** Quiénes están mirando este paso, sin contarme. Alimenta el halo de Foco. */
+export function quienMira(p: Presencia, n: number): Espectador[] {
+  return p.espectadores.filter((e) => !e.soyYo && esTestigo(e) && e.mirandoPaso === n);
 }
 
 /** Cómo va la conexión. Superset mínimo común entre mock y Portal. */
@@ -119,13 +140,30 @@ export interface Transporte {
   /** Declara qué paso estoy mirando (o ninguno). */
   mirando(n: number | undefined): void;
 
+  /**
+   * Declara si estoy mirando la sala. `false` = cerré los ojos.
+   *
+   * Sigo conectado y sigo recibiendo todo; simplemente dejo de contar como
+   * testigo, y el agente se comporta como si estuviera solo.
+   */
+  atender(presente: boolean): void;
+
   desconectar(): void;
 }
+
+export type ClaseTransporte = "portal" | "mock";
 
 export interface OpcionesTransporte {
   canalId: string;
   /** metadatos de presencia iniciales (nombre, color, …) */
   metadata?: Record<string, unknown>;
+  /**
+   * Fuerza una implementación, ignorando la llave.
+   *
+   * Existe para el demo: si Portal falla en vivo, `?transporte=mock` deja la
+   * sesión funcionando entre pestañas sin tocar código ni reiniciar nada.
+   */
+  forzar?: ClaseTransporte;
 }
 
 /**
@@ -140,7 +178,7 @@ export async function crearTransporte(
 ): Promise<Transporte> {
   const apiKey = process.env.NEXT_PUBLIC_PORTAL_API_KEY;
 
-  if (apiKey) {
+  if (opciones.forzar !== "mock" && apiKey) {
     const { TransportePortal } = await import("./transporte-portal");
     return new TransportePortal(opciones, apiKey);
   }
@@ -150,6 +188,14 @@ export async function crearTransporte(
 }
 
 /** Para pintar en la UI qué transporte está activo. Sin secretos. */
-export function transporteActivo(): "portal" | "mock" {
+export function transporteActivo(forzar?: ClaseTransporte): ClaseTransporte {
+  if (forzar === "mock") return "mock";
   return process.env.NEXT_PUBLIC_PORTAL_API_KEY ? "portal" : "mock";
+}
+
+/** Lee `?transporte=mock` de la URL. Solo en el navegador. */
+export function transporteDeLaUrl(): ClaseTransporte | undefined {
+  if (typeof window === "undefined") return undefined;
+  const v = new URLSearchParams(window.location.search).get("transporte");
+  return v === "mock" || v === "portal" ? v : undefined;
 }

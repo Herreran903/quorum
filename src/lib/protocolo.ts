@@ -29,6 +29,13 @@ export interface Paso {
   /** 0..1 — qué tan seguro está el agente de este paso. */
   confianza: number;
   estado: EstadoPaso;
+  /**
+   * El agente ejecutó este paso sin nadie mirando.
+   *
+   * Es lo que hace visible el silencio: sin esta marca, "avanzó solo porque
+   * la sala estaba vacía" y "el agente hizo algo" se ven idénticos en pantalla.
+   */
+  sinTestigos?: boolean;
 }
 
 /** Por qué el agente encoló una duda en vez de preguntarla. */
@@ -81,6 +88,13 @@ export interface Atencion {
   escribiendo: boolean;
   /** el `n` del paso que está mirando, si lo hay */
   mirandoPaso?: number;
+  /**
+   * Estoy mirando la sala. `false` = cerré los ojos: sigo conectado pero
+   * dejo de contar como testigo, y el agente se comporta como si estuviera solo.
+   *
+   * Ausente se lee como `true`, para que un cliente viejo siga contando.
+   */
+  presente?: boolean;
 }
 
 /** Cuerpo de un mensaje persistente. */

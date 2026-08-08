@@ -27,6 +27,8 @@ import {
   crearTransporte,
   otrosEn,
   transporteActivo,
+  transporteDeLaUrl,
+  type ClaseTransporte,
   type EstadoConexion,
   type Presencia,
   type Transporte,
@@ -87,7 +89,7 @@ export interface UseSesion {
   /** cómo ve la política a esta sala, ahora mismo */
   sala: Sala;
   yo: string | undefined;
-  transporte: "portal" | "mock";
+  transporte: ClaseTransporte;
   agenteCorriendo: boolean;
   /** la pregunta que tiene frenado al agente en ESTA pestaña, si la hay */
   preguntaAbierta: Pregunta | undefined;
@@ -98,6 +100,19 @@ export interface UseSesion {
   degradado: string | undefined;
   /** true mientras el modelo arma el plan */
   planeando: boolean;
+  /** Testigo: cerré los ojos, sigo conectado pero no cuento como testigo */
+  ojosCerrados: boolean;
+  cerrarOjos: (cerrados: boolean) => void;
+  /** lo que el agente hizo mientras no mirabas; undefined si no hay nada */
+  confesion:
+    | {
+        pasos: Paso[];
+        aSolas: number;
+        arriesgados: number;
+        volantes: Volante[];
+      }
+    | undefined;
+  descartarConfesion: () => void;
 
   arrancarAgente: () => void;
   pararAgente: () => void;
@@ -120,6 +135,8 @@ export function useSesion(idSesion: string): UseSesion {
   /** mensaje del fallo si el modelo se cayó y respondió el guion */
   const [degradado, setDegradado] = useState<string | undefined>();
   const [planeando, setPlaneando] = useState(false);
+  /** qué transporte quedó activo; se resuelve al montar, ya en el navegador */
+  const [clase, setClase] = useState<ClaseTransporte>("mock");
 
   const transporteRef = useRef<Transporte | null>(null);
   const agenteRef = useRef<AgenteSimulado | null>(null);
@@ -139,8 +156,13 @@ export function useSesion(idSesion: string): UseSesion {
     let vivo = true;
     let creado: Transporte | null = null;
 
+    const forzar = transporteDeLaUrl();
+
     void (async () => {
-      const t = await crearTransporte({ canalId: canalDeSesion(idSesion) });
+      const t = await crearTransporte({ canalId: canalDeSesion(idSesion), forzar });
+      // Se resuelve aquí, no en el cuerpo del efecto: la clase solo se conoce
+      // en el navegador, y fijarla sincrónicamente encadena renders.
+      setClase(transporteActivo(forzar));
       if (!vivo) {
         t.desconectar();
         return;
@@ -244,6 +266,56 @@ export function useSesion(idSesion: string): UseSesion {
     transporteRef.current?.mirando(n);
   }, []);
 
+  /**
+   * Testigo: cerrar los ojos.
+   *
+   * No desconecta ni pausa nada — sigues viendo todo llegar. Simplemente
+   * dejas de contar como testigo, y la política empieza a decidir como si la
+   * sala estuviera vacía. Es la forma de ver el comportamiento solitario del
+   * agente sin tener que cerrar la pestaña.
+   */
+  const [ojosCerrados, setOjosCerrados] = useState(false);
+  /** el `n` del último paso visto al cerrar los ojos; corta la confesión */
+  const marcaRef = useRef(0);
+  const [confesionDesde, setConfesionDesde] = useState<number | undefined>();
+
+  // Espejo de los pasos sin pasar por el render, para poder marcar el corte
+  // en el instante exacto en que se cierran los ojos.
+  const ultimoPasoRef = useRef(0);
+  useEffect(() => {
+    ultimoPasoRef.current = estado.pasos.reduce((max, p) => Math.max(max, p.n), 0);
+  }, [estado.pasos]);
+
+  const cerrarOjos = useCallback((cerrados: boolean) => {
+    setOjosCerrados(cerrados);
+    transporteRef.current?.atender(!cerrados);
+    if (cerrados) {
+      marcaRef.current = ultimoPasoRef.current;
+      setConfesionDesde(undefined);
+      return;
+    }
+    // Al abrirlos: el agente confiesa, y lo que acumuló a solas sale como
+    // UNA sola pregunta.
+    setConfesionDesde(marcaRef.current);
+    void agenteRef.current?.alCambiarLaSala();
+  }, []);
+
+  const descartarConfesion = useCallback(() => setConfesionDesde(undefined), []);
+
+  /** Lo que el agente hizo mientras tenías los ojos cerrados. */
+  const confesion = useMemo(() => {
+    if (confesionDesde === undefined) return undefined;
+    const pasos = estado.pasos.filter((p) => p.n > confesionDesde);
+    if (pasos.length === 0) return undefined;
+    const nuevos = new Set(pasos.map((p) => p.n));
+    return {
+      pasos,
+      aSolas: pasos.filter((p) => p.sinTestigos).length,
+      arriesgados: pasos.filter((p) => p.riesgo === "alto").length,
+      volantes: estado.volantes.filter((v) => v.pasos.some((n) => nuevos.has(n))),
+    };
+  }, [confesionDesde, estado.pasos, estado.volantes]);
+
   const sala = useMemo<Sala>(
     () => ({ espectadores: otrosEn(presencia), escribiendo: alguienEscribe(presencia) }),
     [presencia],
@@ -255,13 +327,17 @@ export function useSesion(idSesion: string): UseSesion {
     conexion,
     sala,
     yo,
-    transporte: transporteActivo(),
+    transporte: clase,
     agenteCorriendo,
     preguntaAbierta,
     ultimaDecision,
     fuente,
     degradado,
     planeando,
+    ojosCerrados,
+    cerrarOjos,
+    confesion,
+    descartarConfesion,
     arrancarAgente,
     pararAgente,
     responder,

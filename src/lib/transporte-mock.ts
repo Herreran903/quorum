@@ -40,6 +40,7 @@ type Trama =
       at: number;
       escribiendoHasta: number;
       mirandoPaso?: number;
+      presente: boolean;
     }
   | { clase: "adios"; id: string };
 
@@ -48,6 +49,7 @@ interface Vecino {
   visto: number;
   escribiendoHasta: number;
   mirandoPaso?: number;
+  presente: boolean;
 }
 
 function nuevoId(): string {
@@ -69,6 +71,7 @@ export class TransporteMock implements Transporte {
   readonly #vecinos = new Map<string, Vecino>();
   #escribiendoHasta = 0;
   #mirandoPaso: number | undefined;
+  #presente = true;
   #ultimoEscribiendoEnviado = 0;
 
   #latido: ReturnType<typeof setInterval> | undefined;
@@ -170,6 +173,15 @@ export class TransporteMock implements Transporte {
     this.#emitirPresencia();
   }
 
+  atender(presente: boolean): void {
+    if (this.#presente === presente) return;
+    this.#presente = presente;
+    // Con los ojos cerrados no se mira ningún paso.
+    if (!presente) this.#mirandoPaso = undefined;
+    this.#emitirLatido();
+    this.#emitirPresencia();
+  }
+
   desconectar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
@@ -209,6 +221,7 @@ export class TransporteMock implements Transporte {
           visto: Date.now(),
           escribiendoHasta: trama.escribiendoHasta,
           mirandoPaso: trama.mirandoPaso,
+          presente: trama.presente !== false,
         });
         this.#emitirPresencia();
         return;
@@ -238,6 +251,7 @@ export class TransporteMock implements Transporte {
       at: Date.now(),
       escribiendoHasta: this.#escribiendoHasta,
       mirandoPaso: this.#mirandoPaso,
+      presente: this.#presente,
     } satisfies Trama);
   }
 
@@ -262,6 +276,7 @@ export class TransporteMock implements Transporte {
       escribiendo: this.#escribiendoHasta > ahora,
       escribiendoHasta: this.#escribiendoHasta,
       mirandoPaso: this.#mirandoPaso,
+      presente: this.#presente,
       soyYo: true,
     };
     const otros: Espectador[] = [...this.#vecinos.values()]
@@ -271,6 +286,7 @@ export class TransporteMock implements Transporte {
         escribiendo: v.escribiendoHasta > ahora,
         escribiendoHasta: v.escribiendoHasta,
         mirandoPaso: v.mirandoPaso,
+        presente: v.presente,
         soyYo: false,
       }));
 
