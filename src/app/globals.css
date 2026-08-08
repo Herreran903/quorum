@@ -3,124 +3,112 @@
 /**
  * LA VOZ HUMANA — Redaction, de Jeremy Mickel (OFL-1.1, redaction.us).
  *
- * Se carga en tres grados. No son pesos: son tramas de medio tono cada vez más
- * gruesas, dibujadas para que el carácter se desintegre de forma legible.
- * Aquí eso no es estilo — es el canal por el que viaja la CONFIANZA que el
- * modelo declara en cada paso. Un paso dudoso se lee dentado.
- *
- * Se descartó el grado 10: pesa 124KB y su diferencia contra el regular no
- * sobrevive a la compresión de un video. Tres escalones se distinguen; cuatro
- * solo abultan.
+ * Tres grados de trama de medio tono. No son pesos: la letra se desintegra.
+ * Aquí eso no es estilo — es el canal por el que viaja la CONFIANZA que la
+ * máquina declara. Un paso dudoso se lee dentado, ahora, mientras ocurre.
  */
 @import "@fontsource/redaction/400.css";
 @import "@fontsource/redaction/700.css";
 @import "@fontsource/redaction-20/400.css";
 @import "@fontsource/redaction-35/400.css";
 
-/**
- * LA VOZ DE LA MÁQUINA — Martian Mono.
- * Todo lo que dice el sistema y toda la UI. La distinción humano/máquina
- * viaja por FORMA, no solo por color: el color es el recurso escaso.
- */
+/** LA VOZ DE LA MÁQUINA — Martian Mono. Todo lo que el sistema informa. */
 @import "@fontsource/martian-mono/400.css";
 @import "@fontsource/martian-mono/700.css";
 
+/**
+ * EL TABLERO — Handjet (Rosetta, OFL), variable con ejes de peso y de FORMA
+ * DE ELEMENTO. Cada glifo es una matriz de celdas: la misma familia del
+ * flip-dot de estación, del póster de Muriel Cooper y del "3" de IBM.
+ * Solo para el estado gigante: la palabra que el tablero voltea.
+ */
+@import "@fontsource-variable/handjet/full.css";
+
 @theme {
   /**
-   * EL SUSTRATO
-   * ===========
-   * Papel claro con un campo oscuro cálido usado como PUNTUACIÓN, no como
-   * lienzo. Es el patrón que Fly.io, Vercel y Tinybird usan en producción: uno
-   * o dos bloques a sangre marcan el ritmo; el resto es documento.
+   * DOS VALORES Y UN SATURADO.
+   * =========================
+   * Es la disciplina de 2xA (casi negro y hueso, cero color) y de Serotoninn
+   * (negro, crema, un solo rojo). El campo oscuro dejó de ser puntuación: es
+   * el espacio donde la máquina trabaja, y tú estás asomado a él.
    *
-   * No hay gris puro ni negro puro en ninguna parte. Toda la rampa neutra está
-   * tintada hacia la tinta, así que la agrupación emerge de la temperatura
-   * compartida y nada se lee como una pieza importada.
+   * Ningún negro puro ni gris puro: toda la rampa está tibia, así que la
+   * agrupación emerge de la temperatura y nada se lee como pieza importada.
    */
-  --color-papel: #f5f3ef;
-  --color-banda: #e8e4dc;
-  --color-filete: #d8d4cc;
-  --color-mina: #6b6862;
-  --color-tinta: #1a1a17;
-  --color-campo: #291523;
-  --color-campo-tenue: #b3a3ae;
+  --color-fondo: #0d0d0c;
+  --color-hondo: #080807;
+  --color-hueso: #e8e6e0;
 
   /**
-   * LOS DOS ÚNICOS SATURADOS, Y SU REGLA
-   * ====================================
-   * El vino es SOLO estado: riesgo alto, bloqueado, descartado. Nunca decora.
-   * Es el único canal que puede gritar, y gastarlo en adorno lo vuelve ambiente.
-   * El verde es SOLO voz de máquina: etiquetas de dato, cifras, `conf 0.34`.
-   *
-   * Si algo necesita distinguirse y no es ninguna de esas dos cosas, se
-   * distingue por FORMA, INVERSIÓN o PESO. No por un tercer color.
+   * LA JERARQUÍA SE HACE APAGANDO, NO ENCENDIENDO.
+   * Obys deja toda su lista en gris casi ilegible y pone en negro SOLO lo que
+   * estás mirando. Aquí igual: lo ya ocurrido se apaga, lo vivo queda en hueso.
    */
-  --color-vino: #a02d45;
-  --color-vino-claro: #e9818e;
-  --color-dato: #0a7d32;
+  --color-pasado: #55534d;
+  --color-tenue: #2a2926;
 
   /**
-   * EL NEGRO DE REDACCIÓN
-   * =====================
-   * Único hex añadido al sistema, y más negro que la propia tinta. Cubre lo
-   * que el agente decidió sin testigos, con el ancho exacto de la frase que no
-   * se dijo. Que pese más que el texto es deliberado: lo tachado importa más
-   * que lo dicho.
+   * EL ÚNICO SATURADO. Solo estado: riesgo, detención, lo que exige mirar.
+   * Es el vino del sistema del dueño, aclarado para sobrevivir al campo oscuro
+   * — su propio portafolio ya hace esa distinción por la misma razón.
+   * Si algo más necesita distinguirse, lo hace por FORMA, no por color.
    */
-  --color-redaccion: #12100e;
+  --color-alarma: #e9818e;
 
   --font-acta: "Redaction", Georgia, "Times New Roman", serif;
   --font-acta-20: "Redaction 20", Georgia, serif;
   --font-acta-35: "Redaction 35", Georgia, serif;
   --font-maquina: "Martian Mono", ui-monospace, "SF Mono", monospace;
+  --font-tablero: "Handjet Variable", "Martian Mono", monospace;
 
   /**
-   * ESCALA TIPOGRÁFICA
-   * ==================
-   * Fluida con clamp() y el tracking cerrándose al crecer: una letra dibujada
-   * para 16px tiene los espacios demasiado abiertos a 64px. Es la corrección
-   * óptica que las fuentes con eje `opsz` hacen solas.
-   *
-   * Martian Mono es ancha de fábrica, así que su tracking se cierra más que el
-   * de una sans normal a la misma escala.
+   * DOS EXTREMOS Y NADA EN MEDIO.
+   * En 2xA el logotipo mide cuarenta veces el texto de servicio. Esa es la
+   * escala que faltaba: o es enorme, o es diminuto.
    */
-  --text-acta: clamp(2rem, 1.4rem + 2.8vw, 3.5rem);
-  --text-acta--line-height: 1.04;
-  --text-acta--letter-spacing: -0.03em;
+  /**
+   * Handjet es angosta y de matriz: aguanta más cuerpo que una sans normal
+   * sin comerse el ancho, y el tracking se abre un pelo — los glifos de
+   * celdas se pegan si se cierran como una display dibujada.
+   */
+  --text-estado: clamp(4.5rem, 14vw, 13rem);
+  --text-estado--line-height: 0.8;
+  --text-estado--letter-spacing: 0.02em;
 
-  --text-rotulo: 0.6875rem;
-  --text-rotulo--line-height: 1.2;
-  --text-rotulo--letter-spacing: 0.08em;
+  --text-servicio: 0.625rem;
+  --text-servicio--line-height: 1.3;
+  --text-servicio--letter-spacing: 0.14em;
 
-  --text-paso: 1rem;
-  --text-paso--line-height: 1.5;
-}
-
-/**
- * La retícula del acta. Aparece al 8% cuando el agente calla: la estructura se
- * muestra porque el contenido no. Ver `.callado`.
- */
-@utility reticula {
-  background-image: repeating-linear-gradient(
-    to right,
-    var(--color-filete) 0 1px,
-    transparent 1px 100%
-  );
-  background-size: calc(100% / 12) 100%;
+  --text-obra: 1.0625rem;
+  --text-obra--line-height: 1.45;
 }
 
 /** Rayado diagonal: el tercer estado. Ni dato, ni cero — NO DELIBERADO. */
 @utility rayado {
   background-image: repeating-linear-gradient(
     -45deg,
-    var(--color-filete) 0 1px,
-    transparent 1px 6px
+    var(--color-tenue) 0 1px,
+    transparent 1px 7px
   );
 }
 
 html {
-  background: var(--color-papel);
-  color: var(--color-tinta);
+  background: var(--color-fondo);
+  color: var(--color-hueso);
+}
+
+/**
+ * Grano. Un campo #0d0d0c plano por CSS se lee como default; el mismo campo
+ * con ruido a 4% se lee como material. Es el movimiento más barato que
+ * existe para dar materia (Langfuse lo hace con papel; Zed con noise.webp).
+ */
+.grano::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 body {
@@ -130,17 +118,15 @@ body {
 }
 
 /**
- * Un paso entra COMPLETO, en un cuadro. Nunca tecleado, nunca deslizándose y
- * empujando la lista. `steps(1)` porque esto es una plancha que se imprime,
- * no un texto que se escribe.
- *
- * 150ms es el token de "cambio de estado" que Vercel y Liveblocks publican;
- * el stagger no aplica: los pasos llegan de uno en uno, no en bloque.
+ * Un paso aterriza. 150ms es el token de cambio de estado que publican Vercel
+ * y Liveblocks. El stagger NO aplica: los pasos llegan de uno en uno, no en
+ * bloque, así que cada uno entra solo. Y no se desliza empujando la lista —
+ * eso marea; solo aparece y se asienta.
  */
-@keyframes plancha {
+@keyframes aterriza {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-3px);
   }
   to {
     opacity: 1;
@@ -148,8 +134,8 @@ body {
   }
 }
 
-.plancha {
-  animation: plancha 150ms steps(2, end) both;
+.aterriza {
+  animation: aterriza 150ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 /**
@@ -157,7 +143,7 @@ body {
  * cambio de estado y quitar el desplazamiento.
  */
 @media (prefers-reduced-motion: reduce) {
-  .plancha {
+  .aterriza {
     animation: none;
   }
   *,
