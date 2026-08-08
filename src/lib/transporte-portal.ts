@@ -30,8 +30,8 @@ import type {
   Unsubscribe,
 } from "@portalsdk/core";
 
-import type { Atencion, Cuerpo, Sobre } from "./protocolo";
-import { esEfimero } from "./protocolo";
+import type { Cuerpo, Sobre } from "./protocolo";
+import { TOPE_CONTENIDO_BYTES } from "./protocolo";
 import type {
   Desuscribir,
   EstadoConexion,
@@ -41,15 +41,14 @@ import type {
   Transporte,
 } from "./transporte";
 
-/** Tope duro de Portal para `content`. */
-const TOPE_CONTENIDO_BYTES = 2048;
 
-/** Sin anuncio nuevo en este tiempo, la atención ajena se da por caduca. */
-const VIGENCIA_ATENCION_MS = 6000;
-/** Cada cuánto reanuncio mi atención, para que nadie me dé por ido. */
-const PULSO_ATENCION_MS = 2500;
-/** El tecleo se muestrea; los cambios de mirada y presencia no. */
-const THROTTLE_ATENCION_MS = 500;
+/**
+ * Cuánto vale mi propio "estoy escribiendo".
+ *
+ * Solo para mí: `activity` de Portal nunca incluye al propio usuario, así que
+ * el resto lo sabe por la señal nativa y yo lo llevo con el reloj.
+ */
+const VIGENCIA_TECLEO_MS = 6000;
 
 function mapearEstado(s: ChannelStatus): EstadoConexion {
   switch (s) {
@@ -84,30 +83,23 @@ export class TransportePortal implements Transporte {
   #buffer: Sobre[] = [];
 
   #escribiendoHasta = 0;
-  #mirandoPaso: number | undefined;
-  #presente = true;
   #cerrado = false;
 
-  /**
-   * Atención ajena, recibida por mensajes EFÍMEROS.
-   *
-   * MEDIDO EN PORTAL 0.1.5: `setMetadata` NO propaga a los demás
-   * participantes. Un cliente ve su propio cambio, pero el resto sigue
-   * viendo la metadata del connect frame. Verificado con dos pestañas
-   * conectadas al mismo canal real.
-   *
-   * Como toda la política depende de saber quién mira, la atención viaja
-   * por el canal como efímero — que es justo para lo que existe: sin orden,
-   * sin historia, sin persistir.
-   */
-  readonly #atenciones = new Map<string, { a: Atencion; at: number }>();
-  #ultimaAtencionEnviada = 0;
-  #pulso: ReturnType<typeof setInterval> | undefined;
-
   constructor(opciones: OpcionesTransporte, apiKey: string) {
-    // Modo anónimo: sin `token`, el SDK acuña su propia credencial y la
+    // Con `token`, Portal verifica el JWT contra el JWKS del proveedor y
+    // publica el `username` firmado en la presencia — ese es el nombre real,
+    // y no puede falsificarse desde el cliente.
+    //
+    // Sin `token` es modo anónimo: el SDK acuña su propia credencial y la
     // mantiene estable entre recargas. `me.anon === true`.
-    const portal = new Portal({ apiKey });
+    //
+    // Se envuelve la función porque el SDK espera `Promise<string>` y la
+    // nuestra puede devolver `null` cuando todavía no hay sesión.
+    const token = opciones.token;
+    const portal = new Portal({
+      apiKey,
+      ...(token ? { token: async () => (await token()) ?? "" } : {}),
+    });
 
     this.#canal = portal.channel<Cuerpo>(opciones.canalId, {
       history: 200,
@@ -128,13 +120,6 @@ export class TransportePortal implements Transporte {
 
     // Primer momento de red del SDK. Antes de esto no hay conexión ni token.
     this.#canal.acquire();
-
-    // Reanuncio periódico: sin él, quien está quieto mirando un paso caduca
-    // y su halo desaparece aunque siga ahí.
-    this.#pulso = setInterval(() => {
-      this.#anunciarAtencion(true);
-      this.#emitirPresencia();
-    }, PULSO_ATENCION_MS);
   }
 
   get yo(): string | undefined {
@@ -147,10 +132,6 @@ export class TransportePortal implements Transporte {
     if (this.#cerrado) return;
     avisarSiPesaDemasiado(cuerpo);
 
-    if (esEfimero(cuerpo)) {
-      await this.#canal.send({ ephemeral: true, content: cuerpo, type: cuerpo.tipo });
-      return;
-    }
     await this.#canal.send({ content: cuerpo, type: cuerpo.tipo });
   }
 
@@ -193,68 +174,28 @@ export class TransportePortal implements Transporte {
 
   // ------------------------------------------------------------------ señales
 
+  /**
+   * "Estoy escribiendo", por la vía nativa de Portal.
+   *
+   * Antes esto además publicaba un mensaje PERSISTENTE de atención cada 2,5s
+   * por cliente. Con `history: 200`, unos pocos minutos de sesión bastaban
+   * para que ese goteo desalojara la conversación entera: quien entraba
+   * tarde recibía un backfill de puro ruido y veía una sala vacía — es decir,
+   * rompía exactamente lo que esta app promete.
+   *
+   * `sendTyping` ya viene con throttle, lo expira el servidor y lo empuja por
+   * WebSocket. No hace falta nada más.
+   */
   escribiendo(): void {
     if (this.#cerrado) return;
-    this.#escribiendoHasta = Date.now() + VIGENCIA_ATENCION_MS;
-    // `activity` sí funciona y ya viene con throttle del SDK; se usa además
-    // del efímero porque es la señal nativa de Portal.
+    this.#escribiendoHasta = Date.now() + VIGENCIA_TECLEO_MS;
     this.#canal.sendTyping();
-    this.#anunciarAtencion();
     this.#emitirPresencia();
-  }
-
-  mirando(n: number | undefined): void {
-    if (this.#cerrado || this.#mirandoPaso === n) return;
-    this.#mirandoPaso = n;
-    this.#anunciarAtencion(true);
-    this.#emitirPresencia();
-  }
-
-  atender(presente: boolean): void {
-    if (this.#cerrado || this.#presente === presente) return;
-    this.#presente = presente;
-    if (!presente) this.#mirandoPaso = undefined;
-    this.#anunciarAtencion(true);
-    this.#emitirPresencia();
-  }
-
-  /**
-   * Anuncia mi atención al canal como efímero.
-   *
-   * `forzar` salta el throttle: un cambio de mirada o de presencia es un
-   * evento discreto que no se puede perder, mientras que el tecleo sí se
-   * puede muestrear.
-   */
-  #anunciarAtencion(forzar = false): void {
-    if (this.#cerrado) return;
-    const ahora = Date.now();
-    if (!forzar && ahora - this.#ultimaAtencionEnviada < THROTTLE_ATENCION_MS) return;
-    this.#ultimaAtencionEnviada = ahora;
-
-    const atencion: Atencion = {
-      escribiendo: this.#escribiendoHasta > ahora,
-      mirandoPaso: this.#mirandoPaso,
-      presente: this.#presente,
-    };
-
-    // PERSISTENTE, no efímero, a pesar de que conceptualmente es efímero.
-    // MEDIDO EN PORTAL 0.1.5 con dos clientes anónimos DISTINTOS en el mismo
-    // canal: los mensajes persistentes cruzan, pero ni `setMetadata` ni los
-    // efímeros llegan al otro lado. Como toda la política depende de saber
-    // quién mira, se usa la única vía que demostrablemente funciona y se
-    // paga el coste: estos mensajes ensucian la historia del canal.
-    void this.#canal
-      .send({ content: { tipo: "atencion", atencion }, type: "atencion" })
-      .catch((e) => {
-        console.error("[transporte-portal] no pude anunciar atención", e);
-      });
   }
 
   desconectar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
-    if (this.#pulso) clearInterval(this.#pulso);
-    this.#pulso = undefined;
     for (const soltar of this.#sueltas) soltar();
     this.#canal.release();
     this.#escuchasMsg.clear();
@@ -267,19 +208,6 @@ export class TransportePortal implements Transporte {
   #entrante(msg: Message<Cuerpo>): void {
     const sobre = aSobre(msg);
     if (!sobre) return;
-
-    // La atención no es historia: alimenta la presencia y no llega a la UI
-    // como mensaje. Es el sustituto de `setMetadata`, que no propaga.
-    if (sobre.cuerpo.tipo === "atencion") {
-      if (sobre.emisor !== this.#canal.me?.id) {
-        this.#atenciones.set(sobre.emisor, {
-          a: sobre.cuerpo.atencion,
-          at: Date.now(),
-        });
-        this.#emitirPresencia();
-      }
-      return;
-    }
 
     if (this.#vistos.has(sobre.id)) return;
     this.#vistos.add(sobre.id);
@@ -295,9 +223,6 @@ export class TransportePortal implements Transporte {
       const sobre = aSobre(msg);
       if (!sobre) continue;
       this.#vistos.add(sobre.id);
-      // La atención del historial es atención VIEJA: quien la mandó ya no
-      // está mirando eso. Solo cuenta la que llega en vivo.
-      if (sobre.cuerpo.tipo === "atencion") continue;
       this.#buffer.push(sobre);
       this.#repartir(sobre);
     }
@@ -326,33 +251,36 @@ export class TransportePortal implements Transporte {
       return aggregateAPresencia(p);
     }
 
-    const ahora = Date.now();
     const espectadores: Espectador[] = (p as DetailedPresence).participants.map(
       (par) => {
+        // `username` lo pone el servidor desde el token firmado; el avatar lo
+        // declara el cliente en su metadata. Uno es identidad, el otro solo
+        // presentación.
+        const nombre = par.username;
+        const avatar =
+          typeof par.metadata?.avatar === "string" ? par.metadata.avatar : undefined;
+
         const soyYo = par.id === yoId;
         if (soyYo) {
           return {
             id: par.id,
             escribiendo: yoEscribe,
             escribiendoHasta: this.#escribiendoHasta,
-            mirandoPaso: this.#mirandoPaso,
-            presente: this.#presente,
+            nombre,
+            avatar,
+            anonimo: par.anon,
             soyYo: true,
           };
         }
 
-        // La atención ajena viene del efímero, no de la metadata. Si caducó,
-        // el participante sigue conectado pero sin señal: se asume presente
-        // y sin mirar nada, que es lo prudente.
-        const entrada = this.#atenciones.get(par.id);
-        const fresca = entrada && ahora - entrada.at < VIGENCIA_ATENCION_MS;
-        const a = fresca ? entrada.a : undefined;
-
+        // El tecleo ajeno sale de `activity`, la señal nativa: la expira el
+        // servidor y llega por WebSocket.
         return {
           id: par.id,
-          escribiendo: a?.escribiendo ?? escribiendoAhora.has(par.id),
-          mirandoPaso: a?.mirandoPaso,
-          presente: a?.presente !== false,
+          escribiendo: escribiendoAhora.has(par.id),
+          nombre,
+          avatar,
+          anonimo: par.anon,
           soyYo: false,
         };
       },
@@ -393,7 +321,6 @@ function aSobre(msg: Message<Cuerpo>): Sobre | undefined {
     id: msg.id,
     emisor: msg.sender.id,
     at: msg.timestamp,
-    efimero: msg.ephemeral,
     cuerpo,
   };
 }

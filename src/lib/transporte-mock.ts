@@ -1,17 +1,15 @@
 /**
  * Transporte mock: dos pestañas del mismo navegador se hablan sin red.
  *
- * Emula a propósito las tres cosas de Portal de las que depende Quorum:
- *  1. mensajes persistentes con backfill al conectar (localStorage)
- *  2. mensajes efímeros sin historia (BroadcastChannel a secas)
- *  3. presencia viva con "escribiendo" (heartbeats con expiración)
+ * Emula a propósito las dos cosas de Portal de las que depende la sala:
+ *  1. mensajes con backfill al conectar (localStorage)
+ *  2. presencia viva con "escribiendo" (latidos con expiración)
  *
  * Con esto se puede trabajar todo el fin de semana aunque Portal esté caído
  * o las llaves no lleguen nunca.
  */
 
 import type { Cuerpo, Sobre } from "./protocolo";
-import { esEfimero } from "./protocolo";
 import type {
   Desuscribir,
   EstadoConexion,
@@ -39,8 +37,8 @@ type Trama =
       id: string;
       at: number;
       escribiendoHasta: number;
-      mirandoPaso?: number;
-      presente: boolean;
+      nombre?: string;
+      avatar?: string;
     }
   | { clase: "adios"; id: string };
 
@@ -48,8 +46,8 @@ interface Vecino {
   id: string;
   visto: number;
   escribiendoHasta: number;
-  mirandoPaso?: number;
-  presente: boolean;
+  nombre?: string;
+  avatar?: string;
 }
 
 function nuevoId(): string {
@@ -70,18 +68,29 @@ export class TransporteMock implements Transporte {
 
   readonly #vecinos = new Map<string, Vecino>();
   #escribiendoHasta = 0;
-  #mirandoPaso: number | undefined;
-  #presente = true;
   #ultimoEscribiendoEnviado = 0;
 
   #latido: ReturnType<typeof setInterval> | undefined;
   #barrido: ReturnType<typeof setInterval> | undefined;
   #cerrado = false;
 
+  /**
+   * Nombre y foto propios.
+   *
+   * En Portal el nombre lo pone el servidor desde el token; acá no hay
+   * servidor, así que se declara. Es lo correcto para un transporte de
+   * desarrollo, pero significa que en mock el nombre NO está verificado.
+   */
+  readonly #nombre: string | undefined;
+  readonly #avatar: string | undefined;
+
   constructor(opciones: OpcionesTransporte) {
     this.#canalId = opciones.canalId;
     this.#claveHistoria = `quorum:historia:${opciones.canalId}`;
     this.yo = nuevoId();
+    const meta = opciones.metadata;
+    this.#nombre = typeof meta?.nombre === "string" ? meta.nombre : undefined;
+    this.#avatar = typeof meta?.avatar === "string" ? meta.avatar : undefined;
     this.#bc = new BroadcastChannel(`quorum:${opciones.canalId}`);
 
     this.#bc.onmessage = (ev: MessageEvent<Trama>) => this.#recibir(ev.data);
@@ -108,11 +117,10 @@ export class TransporteMock implements Transporte {
       id: nuevoId(),
       emisor: this.yo,
       at: Date.now(),
-      efimero: esEfimero(cuerpo),
       cuerpo,
     };
 
-    if (!sobre.efimero) this.#guardar(sobre);
+    this.#guardar(sobre);
 
     // BroadcastChannel no se entrega a sí mismo: reparto local a mano para
     // que el emisor vea su propio mensaje igual que lo verían los demás.
@@ -166,22 +174,6 @@ export class TransporteMock implements Transporte {
     this.#emitirPresencia();
   }
 
-  mirando(n: number | undefined): void {
-    if (this.#mirandoPaso === n) return;
-    this.#mirandoPaso = n;
-    this.#emitirLatido();
-    this.#emitirPresencia();
-  }
-
-  atender(presente: boolean): void {
-    if (this.#presente === presente) return;
-    this.#presente = presente;
-    // Con los ojos cerrados no se mira ningún paso.
-    if (!presente) this.#mirandoPaso = undefined;
-    this.#emitirLatido();
-    this.#emitirPresencia();
-  }
-
   desconectar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
@@ -220,8 +212,8 @@ export class TransporteMock implements Transporte {
           id: trama.id,
           visto: Date.now(),
           escribiendoHasta: trama.escribiendoHasta,
-          mirandoPaso: trama.mirandoPaso,
-          presente: trama.presente !== false,
+          nombre: trama.nombre,
+          avatar: trama.avatar,
         });
         this.#emitirPresencia();
         return;
@@ -250,8 +242,8 @@ export class TransporteMock implements Transporte {
       id: this.yo,
       at: Date.now(),
       escribiendoHasta: this.#escribiendoHasta,
-      mirandoPaso: this.#mirandoPaso,
-      presente: this.#presente,
+      nombre: this.#nombre,
+      avatar: this.#avatar,
     } satisfies Trama);
   }
 
@@ -275,8 +267,8 @@ export class TransporteMock implements Transporte {
       id: this.yo,
       escribiendo: this.#escribiendoHasta > ahora,
       escribiendoHasta: this.#escribiendoHasta,
-      mirandoPaso: this.#mirandoPaso,
-      presente: this.#presente,
+      nombre: this.#nombre,
+      avatar: this.#avatar,
       soyYo: true,
     };
     const otros: Espectador[] = [...this.#vecinos.values()]
@@ -285,8 +277,8 @@ export class TransporteMock implements Transporte {
         id: v.id,
         escribiendo: v.escribiendoHasta > ahora,
         escribiendoHasta: v.escribiendoHasta,
-        mirandoPaso: v.mirandoPaso,
-        presente: v.presente,
+        nombre: v.nombre,
+        avatar: v.avatar,
         soyYo: false,
       }));
 

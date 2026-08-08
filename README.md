@@ -1,17 +1,29 @@
-# Acta — sesión de agente
+# La sala — una sesión de agente que el equipo comparte
 
-Una sesión de agente de IA que varias personas ven en vivo y pueden intervenir.
+Un agente de IA trabaja una tarea larga dentro de un chat que **todo el equipo
+ve en vivo**. Cualquiera entra, lo corrige, y puede tomarle el mando sin que
+se pierda el contexto.
 
-El diferenciador no es la sesión compartida. Es que **el agente decide cuándo
-hablar según quién esté mirando la sala**:
+Hoy trabajar con IA es de un jugador: abrís un chat, escribís, y la respuesta
+la ves solo vos. Acá la sesión es el lugar compartido, no una transcripción
+que se comparte después.
 
-- nadie mira → avanza solo y encola las dudas como *volantes*
-- hay gente y el paso es arriesgado → se detiene y pregunta
-- alguien está escribiendo → se calla y espera
-- varias dudas seguidas → se preguntan como **una sola**, nunca como ráfaga
+## Qué la hace distinta
 
-Esa última regla ataca el modo de fallo documentado de los agentes
-colaborativos: saturar al humano con comentarios.
+- **Se ve quién pidió qué.** Cada instrucción queda atribuida, y cuando el
+  agente la incorpora lo dice: *"aplicó lo que pidió Ana"*. El panel derecho
+  lleva el consolidado por persona, con cuántos pedidos ya entraron.
+- **El resultado se construye a la vista.** Si la tarea pide código, el panel
+  muestra el archivo; si pide investigar o redactar, un documento. Se
+  reescribe turno a turno.
+- **Cuando el equipo se contradice, se vota.** Dos pedidos que chocan abren
+  una votación que frena al agente hasta que se resuelva. Se ve quién votó
+  qué, y el resultado queda en la transcripción.
+- **Un solo conductor.** El agente corre en la pestaña de una persona. Si otra
+  quiere seguir, toma el mando y la primera se detiene sola — nunca dos
+  agentes publicando encima.
+- **Se calla mientras escribís.** Si alguien está tecleando, el agente espera
+  su turno.
 
 ## Correr
 
@@ -19,54 +31,70 @@ colaborativos: saturar al humano con comentarios.
 npm run dev
 ```
 
-Abre `/sesion/demo` **en dos pestañas**. En una, dale a "arrancar agente".
+Abrí `/` — crea una sala y te lleva. Compartí esa URL para que se sumen.
 
-- con una sola pestaña la sala está vacía (el agente no se cuenta a sí mismo):
-  avanza los 12 pasos solo y deja 5 volantes
-- abre la segunda pestaña: los volantes salen como **una sola** pregunta
-- escribe en cualquiera de las dos: el agente se calla mientras tecleas
+Para probar solo, abrí la misma URL en dos pestañas.
+
+## Configuración
+
+Todo es opcional: sin ninguna clave la app funciona, degradando de forma
+explícita.
+
+| variable | sin ella |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | el agente sigue un guion fijo en vez de pensar |
+| `NEXT_PUBLIC_PORTAL_API_KEY` | la sincronización usa BroadcastChannel (solo entre pestañas del mismo navegador) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` | sin login: apodos generados en vez de perfiles reales |
+
+`?transporte=mock` en la URL fuerza el transporte local aunque haya clave de
+Portal. Existe para el demo: si Portal falla en vivo, la sesión sigue
+funcionando entre pestañas sin tocar nada.
+
+### Identidad real
+
+Las claves de Clerk se sacan sin abrir cuenta:
+
+```bash
+npx clerk@latest init --keyless
+```
+
+Eso deja una app de desarrollo temporal. Para que sea permanente y para poder
+configurarla, hay que reclamarla:
+
+```bash
+npx clerk auth login
+```
+
+El nombre que ve el equipo lo extrae **Portal** del token firmado
+(`claimMap.username`), no lo declara el navegador: nadie puede hacerse pasar
+por otro. Para que ese claim exista hay que crear en Clerk una plantilla JWT
+llamada `portal` con el claim `name`. Sin ella la identidad sigue siendo real
+—el `sub` va firmado— pero el nombre viaja sin verificar.
+
+Con identidad configurada, el canal pasa a exigir sesión. Hay que desplegarlo:
+
+```bash
+npx portal deploy
+```
 
 ## Mapa
 
 | archivo | qué es |
 | --- | --- |
-| `src/lib/iniciativa.ts` | **la política**. `decidir()` pura + `Politica` con agrupación |
-| `src/lib/protocolo.ts` | los tipos de todo lo que viaja por el canal |
+| `src/lib/protocolo.ts` | todo lo que viaja por el canal, y nada más |
+| `src/lib/useChat.ts` | el estado, reducido del canal. La única fuente de verdad |
+| `src/lib/agente-chat.ts` | el agente: cuándo habla, cuándo cede, cuándo se calla |
+| `src/lib/modelo-turno.ts` | qué se le pide al modelo y cómo se sanea lo que devuelve |
 | `src/lib/transporte.ts` | la interfaz de red. El resto de la app solo habla con esto |
-| `src/lib/transporte-mock.ts` | BroadcastChannel + localStorage, sin red |
-| `src/lib/transporte-portal.ts` | Portal de verdad |
-| `src/lib/simulador.ts` | agente falso, un paso cada 2s, sin LLM |
-| `src/app/sesion/[id]/` | la sala |
+| `src/lib/identidad.ts` | quién sos, sin que la app conozca a Clerk |
+| `src/app/sala/[id]/panel.tsx` | la pantalla |
 
-## Cambiar mock → Portal
-
-Una línea, en `.env.local`:
-
-```
-NEXT_PUBLIC_PORTAL_API_KEY=pk_...
-```
-
-`crearTransporte()` en `src/lib/transporte.ts` es el único punto de decisión.
-Sin llave, todo corre sobre BroadcastChannel.
-
-Para obtener la llave (verificado contra `@portalsdk/cli` 0.5.5):
-
-```bash
-npx portal login
-```
-
-```bash
-npx portal projects create <nombre-del-proyecto>
-```
-
-```bash
-npx portal keys create
-```
-
-El valor se imprime **una sola vez**.
+El agente no guarda estado propio: **lee** el de `useChat`. Por eso da igual
+en qué pestaña se escriba algo, y por eso el traspaso no pierde contexto — el
+contexto nunca fue de la pestaña, fue del canal.
 
 ## Verificar
 
 ```bash
-npm test && npx tsc --noEmit && npm run build
+npm test && npx tsc --noEmit && npm run lint && npm run build
 ```

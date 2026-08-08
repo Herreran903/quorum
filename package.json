@@ -12,11 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fontsource-variable/handjet": "^5.3.0",
-    "@fontsource/martian-mono": "^5.3.0",
-    "@fontsource/redaction": "^5.3.0",
-    "@fontsource/redaction-20": "^5.3.0",
-    "@fontsource/redaction-35": "^5.3.0",
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@clerk/nextjs": "^7.7.1",
     "@portalsdk/config": "^0.2.1",
     "@portalsdk/core": "^0.1.5",
     "@portalsdk/extension-protocol": "^0.1.0",

@@ -31,20 +31,21 @@ export interface Espectador {
    * cambio por WebSocket, que no se throttlea — y lo deja `undefined`.
    */
   escribiendoHasta?: number;
-  /** el `n` del paso que está mirando, si lo reportó. */
-  mirandoPaso?: number;
   /**
-   * `false` = cerró los ojos: sigue conectado pero no cuenta como testigo.
-   * Ausente se lee como presente, para tolerar clientes que no lo reportan.
+   * Nombre real, VERIFICADO: lo saca Portal del token firmado según
+   * `claimMap.username` y lo publica en la presencia. El cliente no lo
+   * declara, así que nadie puede hacerse pasar por otro. Ausente en anónimo.
    */
-  presente?: boolean;
+  nombre?: string;
+  /**
+   * Foto de perfil. Esta sí la declara el propio cliente (viaja como
+   * metadata), así que es presentación y nunca identidad.
+   */
+  avatar?: string;
+  /** true si conectó sin sesión iniciada. */
+  anonimo?: boolean;
   /** true cuando este espectador soy yo. */
   soyYo: boolean;
-}
-
-/** ¿Este espectador cuenta como testigo? */
-export function esTestigo(e: Espectador): boolean {
-  return e.presente !== false;
 }
 
 /**
@@ -78,7 +79,7 @@ export const PRESENCIA_VACIA: Presencia = {
  */
 export function alguienEscribe(p: Presencia, ahora = Date.now()): boolean {
   return p.espectadores.some((e) => {
-    if (e.soyYo || !esTestigo(e)) return false;
+    if (e.soyYo) return false;
     return e.escribiendoHasta === undefined
       ? e.escribiendo
       : e.escribiendoHasta > ahora;
@@ -86,21 +87,15 @@ export function alguienEscribe(p: Presencia, ahora = Date.now()): boolean {
 }
 
 /**
- * Cuántos TESTIGOS hay aparte de mí. Lo que la política llama `espectadores`.
+ * Cuánta gente hay aparte de mí.
  *
- * Quien cerró los ojos sigue conectado pero no cuenta: esa es toda la
- * mecánica de Testigo. Con presencia agregada no hay lista, así que solo
- * queda el conteo y nadie puede cerrar los ojos.
+ * Con presencia agregada Portal no manda lista, solo un conteo: de ahí que
+ * haya dos caminos.
  */
 export function otrosEn(p: Presencia): number {
   return p.detallada
-    ? p.espectadores.filter((e) => !e.soyYo && esTestigo(e)).length
+    ? p.espectadores.filter((e) => !e.soyYo).length
     : Math.max(0, p.total - 1);
-}
-
-/** Quiénes están mirando este paso, sin contarme. Alimenta el halo de Foco. */
-export function quienMira(p: Presencia, n: number): Espectador[] {
-  return p.espectadores.filter((e) => !e.soyYo && esTestigo(e) && e.mirandoPaso === n);
 }
 
 /** Cómo va la conexión. Superset mínimo común entre mock y Portal. */
@@ -116,7 +111,7 @@ export interface Transporte {
   readonly yo: string | undefined;
   readonly estado: EstadoConexion;
 
-  /** Publica un mensaje. Los efímeros no se persisten ni se reproducen. */
+  /** Publica un mensaje. Todo lo publicado queda en la historia del canal. */
   publicar(cuerpo: Cuerpo): Promise<void>;
 
   /**
@@ -137,17 +132,6 @@ export interface Transporte {
    */
   escribiendo(): void;
 
-  /** Declara qué paso estoy mirando (o ninguno). */
-  mirando(n: number | undefined): void;
-
-  /**
-   * Declara si estoy mirando la sala. `false` = cerré los ojos.
-   *
-   * Sigo conectado y sigo recibiendo todo; simplemente dejo de contar como
-   * testigo, y el agente se comporta como si estuviera solo.
-   */
-  atender(presente: boolean): void;
-
   desconectar(): void;
 }
 
@@ -155,8 +139,16 @@ export type ClaseTransporte = "portal" | "mock";
 
 export interface OpcionesTransporte {
   canalId: string;
-  /** metadatos de presencia iniciales (nombre, color, …) */
+  /** metadatos de presencia iniciales (avatar, …). Presentación, nunca identidad. */
   metadata?: Record<string, unknown>;
+  /**
+   * De dónde sale el token de sesión para Portal.
+   *
+   * Es una función y no un string porque el token caduca y el SDK la vuelve a
+   * llamar. `undefined` — o una que devuelva `null` — es modo anónimo: el SDK
+   * acuña su propia credencial estable.
+   */
+  token?: () => Promise<string | null>;
   /**
    * Fuerza una implementación, ignorando la llave.
    *

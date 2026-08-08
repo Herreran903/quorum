@@ -1,149 +1,161 @@
 /**
- * Protocolo del canal `sesion:{id}`.
+ * Protocolo del canal `sala:{id}`.
  *
  * Todo lo que viaja por el canal está descrito aquí y en ningún otro lado.
- * Ni la UI ni la política conocen el formato del SDK — solo estos tipos.
+ * La UI no conoce el formato del SDK — solo estos tipos.
  *
- * Dos clases de mensaje, siguiendo la separación de Portal:
- *  - persistentes: se reproducen al reconectar; son la historia de la sesión.
- *  - efímeros: no tienen orden ni historia; son señal viva que caduca.
+ * Todo es persistente: se reproduce al reconectar y es la historia de la
+ * sesión. Nada de latidos ni señales que caduquen — el tecleo lo cubre
+ * `activity`, la señal nativa de Portal, y una señal viva emitida como
+ * mensaje terminaría desalojando la conversación del historial.
  */
-
-export type Riesgo = "bajo" | "alto";
-
-export type EstadoPaso =
-  /** el agente lo está ejecutando ahora mismo */
-  | "ejecutando"
-  /** terminó bien */
-  | "hecho"
-  /** el agente se detuvo aquí esperando a la sala */
-  | "bloqueado"
-  /** la sala lo interrumpió antes de terminar */
-  | "descartado";
-
-/** Un paso del agente. Es la unidad que la política evalúa. */
-export interface Paso {
-  n: number;
-  texto: string;
-  riesgo: Riesgo;
-  /** 0..1 — qué tan seguro está el agente de este paso. */
-  confianza: number;
-  estado: EstadoPaso;
-  /**
-   * El agente ejecutó este paso sin nadie mirando.
-   *
-   * Es lo que hace visible el silencio: sin esta marca, "avanzó solo porque
-   * la sala estaba vacía" y "el agente hizo algo" se ven idénticos en pantalla.
-   */
-  sinTestigos?: boolean;
-}
-
-/** Por qué el agente encoló una duda en vez de preguntarla. */
-export type MotivoDuda = "riesgo-alto" | "baja-confianza";
 
 /**
- * Una pregunta del agente a la sala. Cubre uno o varios pasos: cuando hay
- * dudas seguidas se agrupan en UNA sola pregunta. Ver `iniciativa.ts`.
+ * La tarea que la sala le encargó al agente, en lenguaje libre. La define
+ * quien arranca la sesión y es la misma para todos los que entren después
+ * — llega en el backfill como cualquier mensaje persistente.
  */
-export interface Pregunta {
+export interface Tarea {
+  texto: string;
+}
+
+/**
+ * Un turno del chat. Quién lo escribió sale del `emisor` del `Sobre`; lo
+ * único que este cuerpo tiene que declarar es si habló la máquina.
+ */
+export interface Mensaje {
   id: string;
   texto: string;
-  /** los `n` de los pasos que motivaron la pregunta, en orden */
-  pasos: number[];
-  motivos: MotivoDuda[];
+  /**
+   * Nombre de quien escribió, al momento de escribir.
+   *
+   * Está duplicado a propósito. En canales `standard` Portal entrega solo el
+   * id del emisor — "display data is joined app-side by id" — y la presencia,
+   * que es de dónde sale el nombre verificado, solo cubre a quien está
+   * conectado AHORA. Sin esta copia, los mensajes de alguien que ya se fue
+   * quedarían sin nombre.
+   *
+   * Es presentación, no identidad: cuando la persona está presente gana
+   * siempre el nombre verificado de la presencia.
+   */
+  autor?: string;
+  /** lo escribió el agente, no una persona */
+  deAgente?: boolean;
+  /** qué hizo el agente para poder decir esto (p. ej. "Revisando el esquema") */
+  actividad?: string;
+  /**
+   * Los `id` de los mensajes humanos que ESTE turno incorporó.
+   *
+   * Es el mecanismo que hace visible que lo que se dice en el chat cambia lo
+   * que hace el agente: la instrucción se marca aplicada en el panel y queda
+   * atribuida a quien la escribió.
+   */
+  atendio?: string[];
 }
 
-export interface Respuesta {
-  preguntaId: string;
+export type TipoArtefacto = "codigo" | "documento";
+
+/** Lo que el agente está construyendo: un archivo de código o un documento. */
+export interface Artefacto {
+  id: string;
+  tipo: TipoArtefacto;
+  titulo: string;
+  /** para resaltar el código; ausente en documentos */
+  lenguaje?: string;
+  contenido: string;
+  /** sube en cada reescritura; la última gana */
+  version: number;
+}
+
+/**
+ * Un pedazo de artefacto.
+ *
+ * Portal rechaza `content` por encima de 2KB, y un archivo de código lo pasa
+ * enseguida. Así que el artefacto viaja partido y se rearma del otro lado:
+ * una versión solo se muestra cuando llegaron todas sus partes.
+ */
+export interface TrozoArtefacto {
+  id: string;
+  version: number;
+  tipo: TipoArtefacto;
+  titulo: string;
+  lenguaje?: string;
+  /** 0-based */
+  parte: number;
+  total: number;
   texto: string;
 }
 
-/** Alguien frenó al agente en seco. */
-export interface Interrupcion {
+/** Tope duro de Portal para `content`. Por encima de esto, rechaza el mensaje. */
+export const TOPE_CONTENIDO_BYTES = 2048;
+
+/**
+ * Aire que se le deja al transporte por encima de lo que medimos.
+ *
+ * Medimos el cuerpo ya serializado, pero el SDK puede envolverlo con algo más
+ * antes de contarlo. Quedarse corto no cuesta nada; pasarse cuesta que el
+ * trozo se pierda y el artefacto no aparezca nunca.
+ */
+export const MARGEN_SOBRE_BYTES = 192;
+
+export interface OpcionVoto {
+  id: string;
+  texto: string;
+  /** quién propuso esta opción, cuando salió del mensaje de alguien */
+  propuestaPor?: string;
+}
+
+/**
+ * Una decisión que la sala resuelve votando.
+ *
+ * Se abre cuando dos pedidos se contradicen — automáticamente, o porque
+ * alguien la escaló a mano. Mientras hay una abierta el agente no avanza:
+ * la sala manda.
+ */
+export interface Votacion {
+  id: string;
   motivo: string;
+  opciones: OpcionVoto[];
+  /** epoch ms */
+  cierraEn: number;
 }
 
-/** Una regla que la sala le fija al agente y que persiste el resto de la sesión. */
-export interface Restriccion {
-  id: string;
-  texto: string;
+/** Quién votó qué se lee del `emisor` del `Sobre`, no de este cuerpo. */
+export interface Voto {
+  votacionId: string;
+  opcionId: string;
 }
 
-/**
- * Un volante: una duda que el agente tuvo mientras nadie miraba.
- * No interrumpe a nadie — queda encolada para revisión posterior.
- * Es el lado silencioso de la política, y la razón de que el agente
- * pueda avanzar solo sin perder trazabilidad.
- */
-export interface Volante {
-  id: string;
-  pasos: number[];
-  texto: string;
-  motivos: MotivoDuda[];
-  resuelto: boolean;
-}
-
-/** Efímero: dónde tiene puesta la atención un espectador, ahora mismo. */
-export interface Atencion {
-  escribiendo: boolean;
-  /** el `n` del paso que está mirando, si lo hay */
-  mirandoPaso?: number;
-  /**
-   * Estoy mirando la sala. `false` = cerré los ojos: sigo conectado pero
-   * dejo de contar como testigo, y el agente se comporta como si estuviera solo.
-   *
-   * Ausente se lee como `true`, para que un cliente viejo siga contando.
-   */
-  presente?: boolean;
-}
-
-/** Cuerpo de un mensaje persistente. */
-export type CuerpoPersistente =
-  | { tipo: "paso"; paso: Paso }
-  | { tipo: "pregunta"; pregunta: Pregunta }
-  | { tipo: "respuesta"; respuesta: Respuesta }
-  | { tipo: "interrupcion"; interrupcion: Interrupcion }
-  | { tipo: "restriccion"; restriccion: Restriccion }
-  | { tipo: "volante"; volante: Volante };
-
-/** Cuerpo de un mensaje efímero. */
-export type CuerpoEfimero = { tipo: "atencion"; atencion: Atencion };
-
-export type Cuerpo = CuerpoPersistente | CuerpoEfimero;
+/** Todo lo que viaja por el canal. */
+export type Cuerpo =
+  | { tipo: "tarea"; tarea: Tarea }
+  | { tipo: "mensaje"; mensaje: Mensaje }
+  | { tipo: "artefacto"; trozo: TrozoArtefacto }
+  | { tipo: "votacion"; votacion: Votacion }
+  | { tipo: "voto"; voto: Voto };
 
 export type TipoMensaje = Cuerpo["tipo"];
 
-export const TIPOS_PERSISTENTES = [
-  "paso",
-  "pregunta",
-  "respuesta",
-  "interrupcion",
-  "restriccion",
-  "volante",
-] as const satisfies readonly CuerpoPersistente["tipo"][];
-
-export const TIPOS_EFIMEROS = ["atencion"] as const satisfies readonly CuerpoEfimero["tipo"][];
-
-export function esEfimero(cuerpo: Cuerpo): cuerpo is CuerpoEfimero {
-  return cuerpo.tipo === "atencion";
-}
+export const TIPOS = [
+  "tarea",
+  "mensaje",
+  "artefacto",
+  "votacion",
+  "voto",
+] as const satisfies readonly Cuerpo["tipo"][];
 
 /** Lo que entrega el transporte al suscriptor: cuerpo + quién y cuándo. */
 export interface Sobre<C extends Cuerpo = Cuerpo> {
   /** id asignado por el transporte; sirve para deduplicar. */
   id: string;
-  /** id del emisor. El agente emite como `AGENTE`. */
+  /** id del emisor. */
   emisor: string;
   /** epoch ms */
   at: number;
-  efimero: boolean;
   cuerpo: C;
 }
 
-/** El agente publica con este id de emisor. */
-export const AGENTE = "agente";
-
-/** Id de canal para una sesión. La UI nunca lo arma a mano. */
-export function canalDeSesion(idSesion: string): string {
-  return `sesion:${idSesion}`;
+/** Id de canal para una sala. La UI nunca lo arma a mano. */
+export function canalDeSala(idSala: string): string {
+  return `sala:${idSala}`;
 }

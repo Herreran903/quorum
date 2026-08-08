@@ -1,160 +1,49 @@
 @import "tailwindcss";
 
 /**
- * LA VOZ HUMANA — Redaction, de Jeremy Mickel (OFL-1.1, redaction.us).
- *
- * Tres grados de trama de medio tono. No son pesos: la letra se desintegra.
- * Aquí eso no es estilo — es el canal por el que viaja la CONFIANZA que la
- * máquina declara. Un paso dudoso se lee dentado, ahora, mientras ocurre.
+ * El único archivo con `@import "tailwindcss"`, y por eso el único donde
+ * pueden vivir los tokens: un `@theme` fuera de la entrada de Tailwind no
+ * genera utilidades — las clases quedan sin definir y la pantalla sale sin
+ * estilos.
  */
-@import "@fontsource/redaction/400.css";
-@import "@fontsource/redaction/700.css";
-@import "@fontsource/redaction-20/400.css";
-@import "@fontsource/redaction-35/400.css";
-
-/** LA VOZ DE LA MÁQUINA — Martian Mono. Todo lo que el sistema informa. */
-@import "@fontsource/martian-mono/400.css";
-@import "@fontsource/martian-mono/700.css";
-
-/**
- * EL TABLERO — Handjet (Rosetta, OFL), variable con ejes de peso y de FORMA
- * DE ELEMENTO. Cada glifo es una matriz de celdas: la misma familia del
- * flip-dot de estación, del póster de Muriel Cooper y del "3" de IBM.
- * Solo para el estado gigante: la palabra que el tablero voltea.
- */
-@import "@fontsource-variable/handjet/full.css";
-
 @theme {
-  /**
-   * EL MUNDO: papel cálido del sistema del dueño, y la LUZ como único lujo.
-   * ======================================================================
-   * El color saturado no vive en los componentes: vive en LA VETA — el
-   * shader que cruza la página y que es la presencia de la máquina. La UI
-   * alrededor es tinta sobre papel, como su portafolio.
-   *
-   * Nota de nombres: `hueso` es EL PRIMER PLANO (aquí, tinta berenjena
-   * oscura) y `fondo` el campo (papel). Los nombres sobreviven del mundo
-   * oscuro anterior; los valores son los del sistema del dueño.
-   */
-  --color-fondo: #f5f3ef;
-  --color-hondo: #edeae3;
-  --color-hueso: #241a22;
+  --color-noche: #0b0b0f;
+  --color-panel: #131318;
+  --color-panel-alto: #1b1b22;
+  --color-linea: #272730;
+  --color-linea-viva: #3a3a46;
 
-  /**
-   * LA JERARQUÍA SE HACE APAGANDO, NO ENCENDIENDO.
-   * Lo ya ocurrido baja a mina cálida; solo lo vivo queda en tinta plena.
-   */
-  --color-pasado: #8a8078;
-  --color-tenue: #d8d3ca;
+  --color-tinta: #ececf1;
+  --color-tinta-media: #9a9aa8;
+  --color-tinta-baja: #6a6a78;
 
-  /**
-   * EL ÚNICO SATURADO DE COMPONENTE. Solo estado: riesgo, detención, lo que
-   * exige mirar. Sobre papel el vino del dueño va pleno, sin aclarar.
-   */
-  --color-alarma: #a02d45;
+  /** El único color de sistema: lo que la máquina produce. */
+  --color-acento: #7dd3c0;
+  --color-acento-hondo: #10302b;
 
-  /**
-   * EL NEGRO DE REDACCIÓN: más negro que la propia tinta. Lo tachado pesa
-   * más que lo dicho — la censura es tinta aplicada con presión.
-   */
-  --color-redaccion: #12100e;
+  /** Solo para la votación y el conflicto. */
+  --color-voto: #fb7185;
+  --color-voto-hondo: #2e161c;
 
-  --font-acta: "Redaction", Georgia, "Times New Roman", serif;
-  --font-acta-20: "Redaction 20", Georgia, serif;
-  --font-acta-35: "Redaction 35", Georgia, serif;
-  --font-maquina: "Martian Mono", ui-monospace, "SF Mono", monospace;
-  --font-tablero: "Handjet Variable", "Martian Mono", monospace;
+  --color-ok: #4ade80;
 
-  /**
-   * DOS EXTREMOS Y NADA EN MEDIO.
-   * En 2xA el logotipo mide cuarenta veces el texto de servicio. Esa es la
-   * escala que faltaba: o es enorme, o es diminuto.
-   */
-  /**
-   * Handjet es angosta y de matriz: aguanta más cuerpo que una sans normal
-   * sin comerse el ancho, y el tracking se abre un pelo — los glifos de
-   * celdas se pegan si se cierran como una display dibujada.
-   */
-  --text-estado: clamp(4.5rem, 14vw, 13rem);
-  --text-estado--line-height: 0.8;
-  --text-estado--letter-spacing: 0.02em;
-
-  --text-servicio: 0.625rem;
-  --text-servicio--line-height: 1.3;
-  --text-servicio--letter-spacing: 0.14em;
-
-  --text-obra: 1.0625rem;
-  --text-obra--line-height: 1.45;
-}
-
-/** Rayado diagonal: el tercer estado. Ni dato, ni cero — NO DELIBERADO. */
-@utility rayado {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    var(--color-tenue) 0 1px,
-    transparent 1px 7px
-  );
+  --font-codigo: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 html {
-  background: var(--color-fondo);
-  color: var(--color-hueso);
-}
-
-/**
- * Grano. Un campo #0d0d0c plano por CSS se lee como default; el mismo campo
- * con ruido a 4% se lee como material. Es el movimiento más barato que
- * existe para dar materia (Langfuse lo hace con papel; Zed con noise.webp).
- */
-.grano::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.04;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  background: var(--color-noche);
+  color: var(--color-tinta);
+  color-scheme: dark;
 }
 
 body {
-  font-family: var(--font-maquina);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   /* Los números se comparan en columna: sin esto bailan al actualizarse. */
   font-variant-numeric: tabular-nums;
-}
-
-/**
- * Un paso aterriza. 150ms es el token de cambio de estado que publican Vercel
- * y Liveblocks. El stagger NO aplica: los pasos llegan de uno en uno, no en
- * bloque, así que cada uno entra solo. Y no se desliza empujando la lista —
- * eso marea; solo aparece y se asienta.
- */
-@keyframes aterriza {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.aterriza {
-  animation: aterriza 150ms cubic-bezier(0.23, 1, 0.32, 1) both;
-}
-
-/**
- * La respuesta correcta a prefers-reduced-motion no es `none`: es conservar el
- * cambio de estado y quitar el desplazamiento.
- */
-@media (prefers-reduced-motion: reduce) {
-  .aterriza {
-    animation: none;
-  }
-  *,
-  *::before,
-  *::after {
-    transition-duration: 1ms !important;
-    animation-duration: 1ms !important;
-  }
 }
