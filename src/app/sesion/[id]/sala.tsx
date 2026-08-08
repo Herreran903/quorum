@@ -4,11 +4,12 @@ import { useState } from "react";
 
 import { useSesion } from "@/lib/useSesion";
 import type { Paso } from "@/lib/protocolo";
+import { familiaDeConfianza } from "@/lib/tipografia";
 import { quienMira, type Espectador, type Presencia } from "@/lib/transporte";
 
 /**
- * Un nombre corto y estable por espectador. Los ids de Portal son opacos;
- * el halo de Foco necesita algo que un humano pueda reconocer en pantalla.
+ * Un nombre corto y estable por espectador. Los ids son opacos; las marcas de
+ * lectura al margen necesitan algo que un humano reconozca.
  */
 const APODOS = ["ana", "beto", "cami", "dani", "eli", "fran", "gabo", "hugo"];
 
@@ -31,242 +32,225 @@ export function Sala({ idSesion }: { idSesion: string }) {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 p-6 font-mono text-sm">
-      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-neutral-700 pb-3">
-        <div>
-          <h1 className="text-base font-bold">quorum · {idSesion}</h1>
-          <p className="text-xs text-neutral-500">
-            transporte: {s.transporte} · conexión: {s.conexion}
-            {s.fuente && <> · modelo: {s.fuente}</>}
-            {s.yo && <> · soy <span className="text-teal-400">{apodo(s.yo)}</span></>}
-          </p>
-        </div>
-        <Testigos
-          presencia={s.presencia}
-          testigos={s.sala.espectadores}
-          escribiendo={s.sala.escribiendo}
-        />
-      </header>
+    <main className="flex min-h-screen flex-col bg-papel text-tinta">
+      <Cabecera
+        idSesion={idSesion}
+        presencia={s.presencia}
+        testigos={s.sala.espectadores}
+        transporte={s.transporte}
+        conexion={s.conexion}
+        fuente={s.fuente}
+        yo={s.yo}
+      />
 
-      <section className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={s.agenteCorriendo ? s.pararAgente : s.arrancarAgente}
-          className="rounded border border-neutral-600 px-3 py-1 hover:bg-neutral-800"
+      <div className="mx-auto w-full max-w-4xl grow px-6 py-8">
+        <Mandos s={s} />
+
+        {s.confesion && <Confesion c={s.confesion} onCerrar={s.descartarConfesion} />}
+
+        <section
+          className={`mt-8 ${s.sala.escribiendo || s.ojosCerrados ? "reticula" : ""}`}
         >
-          {s.agenteCorriendo ? "parar agente" : "arrancar agente"}
-        </button>
-        <button
-          onClick={() => s.interrumpir("interrumpido desde la sala")}
-          className="rounded border border-neutral-600 px-3 py-1 hover:bg-neutral-800"
-        >
-          interrumpir
-        </button>
-        <button
-          onClick={() => s.cerrarOjos(!s.ojosCerrados)}
-          className={`rounded border px-3 py-1 ${
-            s.ojosCerrados
-              ? "border-violet-500 bg-violet-950/50 text-violet-200"
-              : "border-neutral-600 hover:bg-neutral-800"
-          }`}
-        >
-          {s.ojosCerrados ? "abrir los ojos" : "cerrar los ojos"}
-        </button>
-        {s.planeando && (
-          <span className="text-xs text-sky-400">el modelo está planeando…</span>
-        )}
-        {!s.planeando && s.ultimaDecision && (
-          <span className="text-xs text-neutral-500">{s.ultimaDecision}</span>
-        )}
-      </section>
+          <Rotulo>acta de la sesión</Rotulo>
 
-      {s.degradado && (
-        <p className="rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-400">
-          el modelo falló, siguiendo con el guion de respaldo — {s.degradado}
-        </p>
-      )}
-
-      {s.ojosCerrados && (
-        <p className="rounded border border-violet-600/60 bg-violet-950/40 px-3 py-2 text-xs text-violet-300">
-          tienes los ojos cerrados — el agente cree que está solo y avanza sin
-          preguntarte. sigues viendo todo.
-        </p>
-      )}
-
-      {s.confesion && (
-        <section className="rounded border border-violet-600 bg-violet-950/40 px-3 py-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="text-xs uppercase tracking-wide text-violet-400">
-              lo que hice mientras no mirabas
+          {s.estado.pasos.length === 0 && (
+            <p className="py-6 text-mina" style={{ fontFamily: "var(--font-acta)" }}>
+              Sin actuaciones registradas.
             </p>
-            <button
-              onClick={s.descartarConfesion}
-              className="text-xs text-violet-500 hover:text-violet-300"
-            >
-              cerrar
-            </button>
-          </div>
-          <p className="text-violet-100">
-            Ejecuté {s.confesion.pasos.length}{" "}
-            {s.confesion.pasos.length === 1 ? "paso" : "pasos"}
-            {s.confesion.aSolas > 0 && <> · {s.confesion.aSolas} sin testigos</>}
-            {s.confesion.arriesgados > 0 && (
-              <> · <span className="text-rose-400">{s.confesion.arriesgados} de riesgo alto</span></>
-            )}
-            {s.confesion.volantes.length > 0 && (
-              <> · me quedaron {s.confesion.volantes.length} dudas sin resolver</>
-            )}
-            .
-          </p>
-          <ul className="mt-1 text-xs text-violet-300">
-            {s.confesion.pasos.map((p) => (
-              <li key={p.n}>
-                {p.n}. {p.texto}
-                {p.riesgo === "alto" && <span className="text-rose-400"> (riesgo alto)</span>}
-              </li>
+          )}
+
+          <ol>
+            {s.estado.pasos.map((p) => (
+              <FilaPaso
+                key={p.n}
+                paso={p}
+                onMirar={s.mirar}
+                miran={quienMira(s.presencia, p.n)}
+              />
             ))}
-          </ul>
-        </section>
-      )}
+          </ol>
 
-      {s.sala.escribiendo && (
-        <p className="rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-400">
-          alguien está escribiendo — el agente está callado
-        </p>
-      )}
-
-      <section className="flex flex-col gap-1">
-        <h2 className="text-xs uppercase tracking-wide text-neutral-500">pasos</h2>
-        {s.estado.pasos.length === 0 && (
-          <p className="text-neutral-600">todavía nada. arranca el agente.</p>
-        )}
-        {s.estado.pasos.map((p) => (
-          <FilaPaso
-            key={p.n}
-            paso={p}
-            onMirar={s.mirar}
-            miran={quienMira(s.presencia, p.n)}
-          />
-        ))}
-      </section>
-
-      {s.estado.volantes.length > 0 && (
-        <section className="flex flex-col gap-1">
-          <h2 className="text-xs uppercase tracking-wide text-neutral-500">
-            volantes — dudas que tuvo mientras nadie miraba ({s.estado.volantes.length})
-          </h2>
-          {s.estado.volantes.map((v) => (
-            <p key={v.id} className="text-neutral-400">
-              <span className="text-neutral-600">paso {v.pasos.join(", ")}</span> {v.texto}{" "}
-              <span className="text-neutral-600">[{v.motivos.join(", ")}]</span>
+          {s.planeando && (
+            <p className="py-3 text-rotulo tracking-[0.08em] text-mina uppercase">
+              deliberando…
             </p>
-          ))}
+          )}
+          {/* El silencio no es un hueco: es un tercer estado, y se raya. */}
+          {s.sala.escribiendo && !s.planeando && (
+            <div className="rayado mt-1 flex h-8 items-center px-2 text-rotulo uppercase tracking-[0.08em] text-mina">
+              en suspenso · alguien delibera
+            </div>
+          )}
         </section>
-      )}
 
-      {s.estado.restricciones.length > 0 && (
-        <section className="flex flex-col gap-1">
-          <h2 className="text-xs uppercase tracking-wide text-neutral-500">restricciones</h2>
-          {s.estado.restricciones.map((r) => (
-            <p key={r.id} className="text-emerald-400">
-              · {r.texto}
-            </p>
-          ))}
-        </section>
-      )}
-
-      {s.estado.interrupciones.length > 0 && (
-        <section className="text-xs text-rose-400">
-          {s.estado.interrupciones.map((i, k) => (
-            <p key={k}>interrumpido: {i.motivo}</p>
-          ))}
-        </section>
-      )}
-
-      <div className="mt-auto flex flex-col gap-2">
-        {s.preguntaAbierta && (
-          <div className="rounded border border-sky-700 bg-sky-950/40 px-3 py-2">
-            <p className="text-xs uppercase tracking-wide text-sky-500">
-              el agente pregunta · pasos {s.preguntaAbierta.pasos.join(", ")}
-            </p>
-            <p className="whitespace-pre-wrap text-sky-200">{s.preguntaAbierta.texto}</p>
-          </div>
+        {s.estado.restricciones.length > 0 && (
+          <section className="mt-8">
+            <Rotulo>restricciones fijadas por la sala</Rotulo>
+            <ol className="border-t border-filete">
+              {s.estado.restricciones.map((r) => (
+                <li
+                  key={r.id}
+                  className="border-b border-filete py-2 text-paso"
+                  style={{ fontFamily: "var(--font-acta)" }}
+                >
+                  {r.texto}
+                </li>
+              ))}
+            </ol>
+          </section>
         )}
 
-        <div className="flex gap-2">
-          <input
-            value={borrador}
-            onChange={(e) => {
-              setBorrador(e.target.value);
-              s.avisarEscribiendo();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") enviar();
-            }}
-            placeholder={
-              s.preguntaAbierta ? "responder al agente…" : "fijar una restricción…"
-            }
-            className="flex-1 rounded border border-neutral-700 bg-transparent px-3 py-2 outline-none focus:border-neutral-500"
-          />
-          <button
-            onClick={enviar}
-            className="rounded border border-neutral-600 px-3 py-2 hover:bg-neutral-800"
-          >
-            enviar
-          </button>
-        </div>
+        {s.degradado && (
+          <p className="rayado mt-6 px-2 py-2 text-rotulo uppercase tracking-[0.08em] text-vino">
+            modelo caído · continúa el guion de respaldo
+          </p>
+        )}
       </div>
+
+      <Pie
+        pregunta={s.preguntaAbierta}
+        borrador={borrador}
+        onBorrador={(v) => {
+          setBorrador(v);
+          s.avisarEscribiendo();
+        }}
+        onEnviar={enviar}
+      />
     </main>
   );
 }
 
+function Rotulo({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-2 text-rotulo uppercase tracking-[0.08em] text-mina">
+      {/* El glifo de comentario ya significa "metadato" para esta audiencia. */}
+      <span className="text-filete">{"// "}</span>
+      {children}
+    </p>
+  );
+}
+
 /**
- * Testigos, no conectados.
- *
- * La distinción es el proyecto: quien cerró los ojos sigue conectado pero
- * deja de contar, y es el conteo de TESTIGOS el que mueve a la política.
+ * La banda a sangre. Es la única región invertida del documento y lleva su
+ * propio juego de variables acotado, sin sistema de temas global.
  */
-function Testigos({
+function Cabecera({
+  idSesion,
   presencia,
   testigos,
-  escribiendo,
+  transporte,
+  conexion,
+  fuente,
+  yo,
 }: {
+  idSesion: string;
   presencia: Presencia;
   testigos: number;
-  escribiendo: boolean;
+  transporte: string;
+  conexion: string;
+  fuente?: string;
+  yo?: string;
 }) {
-  const dormidos = presencia.espectadores.filter((e) => e.presente === false).length;
   return (
-    <div className="text-right text-xs">
-      <p>
-        <span className={testigos === 0 ? "text-violet-400" : "text-neutral-100"}>
-          {testigos}
-        </span>{" "}
-        <span className="text-neutral-500">
-          {testigos === 1 ? "testigo" : "testigos"}
-        </span>
-        <span className="text-neutral-600"> · {presencia.total} conectados</span>
-      </p>
-      <p className="text-neutral-600">
-        {escribiendo
-          ? "escribiendo…"
-          : testigos === 0
-            ? "el agente se cree solo"
-            : dormidos > 0
-              ? `${dormidos} con los ojos cerrados`
-              : presencia.detallada
-                ? "presencia detallada"
-                : "solo conteo"}
+    <header className="bg-campo text-papel">
+      <div className="mx-auto flex w-full max-w-4xl flex-wrap items-end justify-between gap-6 px-6 py-6">
+        <div>
+          <h1
+            className="text-acta"
+            style={{ fontFamily: "var(--font-acta)", fontWeight: 700 }}
+          >
+            Quórum
+          </h1>
+          <p className="mt-1 text-rotulo uppercase tracking-[0.08em] text-campo-tenue">
+            sesión {idSesion} · {transporte} · {conexion}
+            {fuente && <> · {fuente}</>}
+            {yo && <> · consta {apodo(yo)}</>}
+          </p>
+        </div>
+
+        <Censo presencia={presencia} testigos={testigos} />
+      </div>
+    </header>
+  );
+}
+
+/**
+ * El censo del teatro: una fila de muescas.
+ * Sólida = testigo. Hueca = conectado con los ojos cerrados.
+ * La ausencia es un asiento que sigue ahí y deja de pesar.
+ */
+function Censo({ presencia, testigos }: { presencia: Presencia; testigos: number }) {
+  const otros = presencia.espectadores.filter((e) => !e.soyYo);
+  return (
+    <div className="text-right">
+      <div className="flex items-end justify-end gap-[3px]">
+        {otros.length === 0 && (
+          <span className="text-rotulo uppercase tracking-[0.08em] text-campo-tenue">
+            sala vacía
+          </span>
+        )}
+        {otros.map((e) => (
+          <span
+            key={e.id}
+            title={`${apodo(e.id)}${e.presente === false ? " · ojos cerrados" : ""}`}
+            className={`h-[14px] w-[6px] border ${
+              e.presente === false
+                ? "border-campo-tenue bg-transparent"
+                : "border-papel bg-papel"
+            }`}
+          />
+        ))}
+      </div>
+      <p className="mt-2 text-rotulo uppercase tracking-[0.08em] text-campo-tenue">
+        {testigos} {testigos === 1 ? "testigo" : "testigos"} · {presencia.total}{" "}
+        {presencia.total === 1 ? "presente" : "presentes"}
       </p>
     </div>
   );
 }
 
-const COLOR_ESTADO: Record<Paso["estado"], string> = {
-  ejecutando: "text-neutral-300",
-  hecho: "text-neutral-400",
-  bloqueado: "text-sky-300",
-  descartado: "text-neutral-600 line-through",
-};
+function Mandos({ s }: { s: ReturnType<typeof useSesion> }) {
+  return (
+    <section className="flex flex-wrap items-center gap-2">
+      <Boton onClick={s.agenteCorriendo ? s.pararAgente : s.arrancarAgente}>
+        {s.agenteCorriendo ? "suspender" : "abrir sesión"}
+      </Boton>
+      <Boton onClick={() => s.interrumpir("la sala lo desvía")}>desviar</Boton>
+      <Boton onClick={() => s.cerrarOjos(!s.ojosCerrados)} activo={s.ojosCerrados}>
+        {s.ojosCerrados ? "abrir los ojos" : "cerrar los ojos"}
+      </Boton>
+      {s.ultimaDecision && !s.planeando && (
+        <span className="text-rotulo uppercase tracking-[0.08em] text-mina">
+          {s.ultimaDecision}
+        </span>
+      )}
+    </section>
+  );
+}
+
+/** Cuadrado es esquemático. Aquí todo lo clicable lleva el mismo peso. */
+function Boton({
+  children,
+  onClick,
+  activo,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  activo?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`border px-3 py-1 text-rotulo uppercase tracking-[0.08em] transition-colors duration-150 ${
+        activo
+          ? "border-tinta bg-tinta text-papel"
+          : "border-filete text-mina hover:border-mina hover:text-tinta"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 function FilaPaso({
   paso,
@@ -275,40 +259,163 @@ function FilaPaso({
 }: {
   paso: Paso;
   onMirar: (n: number | undefined) => void;
-  /** otros espectadores con la mirada puesta en ESTE paso, ahora mismo */
   miran: Espectador[];
 }) {
-  const mirado = miran.length > 0;
+  const redactado = paso.sinTestigos && paso.estado === "hecho";
+
   return (
-    <p
+    <li
       onMouseEnter={() => onMirar(paso.n)}
       onMouseLeave={() => onMirar(undefined)}
-      className={`flex gap-2 rounded px-1 transition-colors ${COLOR_ESTADO[paso.estado]} ${
-        mirado ? "bg-teal-950/60 ring-1 ring-teal-600/70" : ""
-      }`}
+      /* Celdas adyacentes comparten UN filete en vez de duplicarlo. */
+      className="plancha relative grid grid-cols-[2.5rem_1fr_auto] items-baseline gap-3 border-b border-filete py-2"
     >
-      <span className="w-6 shrink-0 text-right text-neutral-600">{paso.n}</span>
-      <span className="flex-1">
-        {paso.texto}
-        {/* Foco: la mirada ajena ya viajaba por Portal; aquí se ve. */}
-        {mirado && (
-          <span className="ml-2 text-xs text-teal-400">
-            ← {miran.map((e) => apodo(e.id)).join(", ")}{" "}
-            {miran.length === 1 ? "está mirando" : "están mirando"}
+      <span className="text-rotulo text-mina">
+        {String(paso.n).padStart(2, "0")}
+      </span>
+
+      <span className="min-w-0">
+        {redactado ? (
+          /* La barra tiene el ancho de la frase que no se dijo. */
+          <span
+            className="inline-block max-w-full align-middle bg-redaccion text-transparent select-none"
+            style={{ fontFamily: familiaDeConfianza(paso.confianza) }}
+            title="ejecutado sin testigos"
+          >
+            {paso.texto}
+          </span>
+        ) : (
+          <span
+            className="text-paso"
+            style={{ fontFamily: familiaDeConfianza(paso.confianza) }}
+          >
+            {paso.texto}
+          </span>
+        )}
+
+        {/* Foco: las marcas de lectura van al margen de la fila que se mira. */}
+        {miran.length > 0 && (
+          <span className="ml-2 text-rotulo uppercase tracking-[0.08em] text-mina">
+            ← {miran.map((e) => apodo(e.id)).join(" ")}
           </span>
         )}
       </span>
-      {paso.sinTestigos && (
-        <span className="shrink-0 text-xs text-violet-400" title="nadie miraba">
-          sin testigos
-        </span>
-      )}
-      {paso.riesgo === "alto" && (
-        <span className="shrink-0 text-rose-500">riesgo alto</span>
-      )}
-      <span className="w-10 shrink-0 text-right text-neutral-600">
-        {paso.confianza.toFixed(2)}
+
+      <span className="flex items-baseline gap-3 text-rotulo">
+        {paso.riesgo === "alto" && (
+          <span className="text-vino uppercase tracking-[0.08em]">riesgo</span>
+        )}
+        <span className="text-dato">conf {paso.confianza.toFixed(2)}</span>
       </span>
-    </p>
+
+      {/* Estado por inversión, no por color: la plancha bloqueada se invierte. */}
+      {paso.estado === "bloqueado" && (
+        <span className="absolute inset-y-0 -left-3 w-[3px] bg-vino" />
+      )}
+    </li>
+  );
+}
+
+/** La confesión no aparece: se DESREDACTA. */
+function Confesion({
+  c,
+  onCerrar,
+}: {
+  c: NonNullable<ReturnType<typeof useSesion>["confesion"]>;
+  onCerrar: () => void;
+}) {
+  return (
+    <section className="mt-8 border-y border-tinta bg-banda px-4 py-4">
+      <div className="flex items-baseline justify-between gap-4">
+        <Rotulo>lo actuado sin testigos</Rotulo>
+        <button
+          onClick={onCerrar}
+          className="text-rotulo uppercase tracking-[0.08em] text-mina hover:text-tinta"
+        >
+          dar por leído
+        </button>
+      </div>
+
+      <p className="text-paso" style={{ fontFamily: "var(--font-acta)" }}>
+        Se ejecutaron {c.pasos.length}{" "}
+        {c.pasos.length === 1 ? "actuación" : "actuaciones"} en ausencia de testigo
+        {c.arriesgados > 0 && (
+          <>
+            , <span className="text-vino">{c.arriesgados} de riesgo alto</span>
+          </>
+        )}
+        {c.volantes.length > 0 && <>, con {c.volantes.length} dudas sin resolver</>}.
+      </p>
+
+      <ol className="mt-3 border-t border-filete">
+        {c.pasos.map((p) => (
+          <li
+            key={p.n}
+            className="grid grid-cols-[2.5rem_1fr] gap-3 border-b border-filete py-1"
+          >
+            <span className="text-rotulo text-mina">
+              {String(p.n).padStart(2, "0")}
+            </span>
+            <span
+              className="text-paso"
+              style={{ fontFamily: familiaDeConfianza(p.confianza) }}
+            >
+              {p.texto}
+              {p.riesgo === "alto" && (
+                <span className="ml-2 text-rotulo uppercase tracking-[0.08em] text-vino">
+                  riesgo
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function Pie({
+  pregunta,
+  borrador,
+  onBorrador,
+  onEnviar,
+}: {
+  pregunta: { id: string; texto: string; pasos: number[] } | undefined;
+  borrador: string;
+  onBorrador: (v: string) => void;
+  onEnviar: () => void;
+}) {
+  return (
+    <footer className="sticky bottom-0 border-t border-filete bg-papel">
+      <div className="mx-auto w-full max-w-4xl px-6 py-4">
+        {pregunta && (
+          <div className="mb-3 border-l-[3px] border-vino pl-3">
+            <p className="text-rotulo uppercase tracking-[0.08em] text-mina">
+              el agente eleva consulta · actuaciones {pregunta.pasos.join(", ")}
+            </p>
+            <p
+              className="mt-1 whitespace-pre-wrap text-paso"
+              style={{ fontFamily: "var(--font-acta)" }}
+            >
+              {pregunta.texto}
+            </p>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <input
+            value={borrador}
+            onChange={(e) => onBorrador(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onEnviar();
+            }}
+            placeholder={pregunta ? "constar respuesta…" : "fijar restricción…"}
+            className="min-w-0 flex-1 border-b border-filete bg-transparent py-2 text-paso outline-none placeholder:text-mina focus:border-tinta"
+            style={{ fontFamily: "var(--font-acta)" }}
+          />
+          <Boton onClick={onEnviar}>hacer constar</Boton>
+        </div>
+      </div>
+    </footer>
   );
 }

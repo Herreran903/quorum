@@ -1,26 +1,169 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/**
+ * LA VOZ HUMANA — Redaction, de Jeremy Mickel (OFL-1.1, redaction.us).
+ *
+ * Se carga en tres grados. No son pesos: son tramas de medio tono cada vez más
+ * gruesas, dibujadas para que el carácter se desintegre de forma legible.
+ * Aquí eso no es estilo — es el canal por el que viaja la CONFIANZA que el
+ * modelo declara en cada paso. Un paso dudoso se lee dentado.
+ *
+ * Se descartó el grado 10: pesa 124KB y su diferencia contra el regular no
+ * sobrevive a la compresión de un video. Tres escalones se distinguen; cuatro
+ * solo abultan.
+ */
+@import "@fontsource/redaction/400.css";
+@import "@fontsource/redaction/700.css";
+@import "@fontsource/redaction-20/400.css";
+@import "@fontsource/redaction-35/400.css";
+
+/**
+ * LA VOZ DE LA MÁQUINA — Martian Mono.
+ * Todo lo que dice el sistema y toda la UI. La distinción humano/máquina
+ * viaja por FORMA, no solo por color: el color es el recurso escaso.
+ */
+@import "@fontsource/martian-mono/400.css";
+@import "@fontsource/martian-mono/700.css";
+
+@theme {
+  /**
+   * EL SUSTRATO
+   * ===========
+   * Papel claro con un campo oscuro cálido usado como PUNTUACIÓN, no como
+   * lienzo. Es el patrón que Fly.io, Vercel y Tinybird usan en producción: uno
+   * o dos bloques a sangre marcan el ritmo; el resto es documento.
+   *
+   * No hay gris puro ni negro puro en ninguna parte. Toda la rampa neutra está
+   * tintada hacia la tinta, así que la agrupación emerge de la temperatura
+   * compartida y nada se lee como una pieza importada.
+   */
+  --color-papel: #f5f3ef;
+  --color-banda: #e8e4dc;
+  --color-filete: #d8d4cc;
+  --color-mina: #6b6862;
+  --color-tinta: #1a1a17;
+  --color-campo: #291523;
+  --color-campo-tenue: #b3a3ae;
+
+  /**
+   * LOS DOS ÚNICOS SATURADOS, Y SU REGLA
+   * ====================================
+   * El vino es SOLO estado: riesgo alto, bloqueado, descartado. Nunca decora.
+   * Es el único canal que puede gritar, y gastarlo en adorno lo vuelve ambiente.
+   * El verde es SOLO voz de máquina: etiquetas de dato, cifras, `conf 0.34`.
+   *
+   * Si algo necesita distinguirse y no es ninguna de esas dos cosas, se
+   * distingue por FORMA, INVERSIÓN o PESO. No por un tercer color.
+   */
+  --color-vino: #a02d45;
+  --color-vino-claro: #e9818e;
+  --color-dato: #0a7d32;
+
+  /**
+   * EL NEGRO DE REDACCIÓN
+   * =====================
+   * Único hex añadido al sistema, y más negro que la propia tinta. Cubre lo
+   * que el agente decidió sin testigos, con el ancho exacto de la frase que no
+   * se dijo. Que pese más que el texto es deliberado: lo tachado importa más
+   * que lo dicho.
+   */
+  --color-redaccion: #12100e;
+
+  --font-acta: "Redaction", Georgia, "Times New Roman", serif;
+  --font-acta-20: "Redaction 20", Georgia, serif;
+  --font-acta-35: "Redaction 35", Georgia, serif;
+  --font-maquina: "Martian Mono", ui-monospace, "SF Mono", monospace;
+
+  /**
+   * ESCALA TIPOGRÁFICA
+   * ==================
+   * Fluida con clamp() y el tracking cerrándose al crecer: una letra dibujada
+   * para 16px tiene los espacios demasiado abiertos a 64px. Es la corrección
+   * óptica que las fuentes con eje `opsz` hacen solas.
+   *
+   * Martian Mono es ancha de fábrica, así que su tracking se cierra más que el
+   * de una sans normal a la misma escala.
+   */
+  --text-acta: clamp(2rem, 1.4rem + 2.8vw, 3.5rem);
+  --text-acta--line-height: 1.04;
+  --text-acta--letter-spacing: -0.03em;
+
+  --text-rotulo: 0.6875rem;
+  --text-rotulo--line-height: 1.2;
+  --text-rotulo--letter-spacing: 0.08em;
+
+  --text-paso: 1rem;
+  --text-paso--line-height: 1.5;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/**
+ * La retícula del acta. Aparece al 8% cuando el agente calla: la estructura se
+ * muestra porque el contenido no. Ver `.callado`.
+ */
+@utility reticula {
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--color-filete) 0 1px,
+    transparent 1px 100%
+  );
+  background-size: calc(100% / 12) 100%;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/** Rayado diagonal: el tercer estado. Ni dato, ni cero — NO DELIBERADO. */
+@utility rayado {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--color-filete) 0 1px,
+    transparent 1px 6px
+  );
+}
+
+html {
+  background: var(--color-papel);
+  color: var(--color-tinta);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-maquina);
+  /* Los números se comparan en columna: sin esto bailan al actualizarse. */
+  font-variant-numeric: tabular-nums;
+}
+
+/**
+ * Un paso entra COMPLETO, en un cuadro. Nunca tecleado, nunca deslizándose y
+ * empujando la lista. `steps(1)` porque esto es una plancha que se imprime,
+ * no un texto que se escribe.
+ *
+ * 150ms es el token de "cambio de estado" que Vercel y Liveblocks publican;
+ * el stagger no aplica: los pasos llegan de uno en uno, no en bloque.
+ */
+@keyframes plancha {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.plancha {
+  animation: plancha 150ms steps(2, end) both;
+}
+
+/**
+ * La respuesta correcta a prefers-reduced-motion no es `none`: es conservar el
+ * cambio de estado y quitar el desplazamiento.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .plancha {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
 }
