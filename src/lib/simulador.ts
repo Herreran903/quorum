@@ -1,9 +1,11 @@
 /**
- * Agente falso. Emite un paso cada 2 segundos con riesgo y confianza variables.
+ * El agente: pide un paso, lo pasa por la política, y publica o se calla.
  *
- * No hay LLM aquí y no debe haberlo todavía: el objetivo es poder VER la
- * política decidiendo, con la sala llenándose y vaciándose, sin depender de
- * una API externa ni de latencia de modelo.
+ * Los pasos vienen de `/api/paso`, que decide en el servidor si los produce un
+ * modelo local o el guion fijo. Aquí no se sabe cuál de los dos fue — igual
+ * que con el transporte, esta clase habla con una sola superficie.
+ *
+ * La `confianza` que alimenta la política la declara el modelo, no nosotros.
  *
  * Lo corre una sola pestaña — la que le da a "arrancar". Las demás solo miran.
  */
@@ -12,47 +14,19 @@ import { AGENTE, type Paso, type Volante } from "./protocolo";
 import { Politica, type Sala } from "./iniciativa";
 import type { Transporte } from "./transporte";
 
+/**
+ * Ritmo del agente. Si el modelo tarda más que esto, el tick siguiente se
+ * salta en vez de encimarse: el ritmo lo marca el modelo, no el reloj.
+ */
 export const INTERVALO_MS = 2000;
 
-interface Guion {
-  texto: string;
-  riesgo: Paso["riesgo"];
-  confianza: number;
+/** Lo que devuelve `/api/paso`. Se declara aquí para no importar del servidor. */
+interface RespuestaPlan {
+  pasos?: { texto: string; riesgo: Paso["riesgo"]; confianza: number }[];
+  fuente: string;
+  ms?: number;
+  degradado?: string;
 }
-
-/**
- * Un guion fijo, no aleatorio, para que la demo pegue siempre los dos casos
- * interesantes: el paso arriesgado con la sala llena y el paso arriesgado con
- * la sala vacía.
- */
-const GUION: Guion[] = [
-  { texto: "Buscar estudios sobre iniciativa de agentes", riesgo: "bajo", confianza: 0.95 },
-  { texto: "Leer el resumen de arXiv 2509.11826", riesgo: "bajo", confianza: 0.91 },
-  { texto: "Descartar 4 resultados sin revisión por pares", riesgo: "bajo", confianza: 0.58 },
-  { texto: "Decidir si el foro de Cursor cuenta como evidencia", riesgo: "bajo", confianza: 0.41 },
-  { texto: "Extraer la cifra de 31,8% de trabajo concurrente", riesgo: "bajo", confianza: 0.89 },
-  { texto: "Descartar el estudio de 2019 por obsoleto", riesgo: "alto", confianza: 0.52 },
-  { texto: "Citar una cifra que solo aparece en un blog", riesgo: "alto", confianza: 0.44 },
-  { texto: "Contrastar las tres fuentes entre sí", riesgo: "bajo", confianza: 0.83 },
-  { texto: "Interpretar la contradicción entre dos de ellas", riesgo: "bajo", confianza: 0.47 },
-  { texto: "Redactar el informe con las tres fuentes", riesgo: "bajo", confianza: 0.9 },
-  { texto: "Publicar el informe en el canal del equipo", riesgo: "alto", confianza: 0.78 },
-];
-
-/**
- * Por dónde sigue el agente cuando la sala lo desvía.
- *
- * Es el paso 2 del guion de demo: interrumpir no lo mata, le cambia el rumbo,
- * y ese cambio se ve en la otra pestaña.
- */
-const DESVIO: Guion[] = [
-  { texto: "Descartar la línea anterior por indicación de la sala", riesgo: "bajo", confianza: 0.94 },
-  { texto: "Buscar solo fuentes con revisión por pares", riesgo: "bajo", confianza: 0.87 },
-  { texto: "Releer el estudio de 2019 que había descartado", riesgo: "bajo", confianza: 0.66 },
-  { texto: "Decidir si la muestra de ese estudio es comparable", riesgo: "bajo", confianza: 0.39 },
-  { texto: "Rehacer el informe sin la cifra del blog", riesgo: "bajo", confianza: 0.85 },
-  { texto: "Publicar el informe corregido", riesgo: "alto", confianza: 0.81 },
-];
 
 export interface EventosAgente {
   /** se llama en cada tick con lo que decidió la política */
@@ -60,7 +34,13 @@ export interface EventosAgente {
     paso: Paso;
     decision: "SEGUIR" | "PREGUNTAR" | "ESPERAR";
     pendientes: number;
+    /** qué produjo el paso: el modelo, o "guion" si el modelo falló */
+    fuente: string;
+    /** mensaje del fallo cuando se cayó al guion */
+    degradado?: string;
   }) => void;
+  /** true mientras el modelo está armando el plan; la UI lo muestra. */
+  onPlaneando?: (planeando: boolean) => void;
   onFin?: () => void;
 }
 
@@ -70,9 +50,9 @@ export class AgenteSimulado {
   readonly #transporte: Transporte;
   readonly #leerSala: () => Sala;
   readonly #eventos: EventosAgente;
+  readonly #tarea: string;
 
   #reloj: ReturnType<typeof setInterval> | undefined;
-  #indice = 0;
   /** el paso que quedó en el aire por un ESPERAR; se reintenta tal cual. */
   #enElAire: Paso | undefined;
   /**
@@ -81,21 +61,39 @@ export class AgenteSimulado {
    * propósito, y quién dio el permiso es asunto de quien la usa.
    */
   readonly #aprobados = new Set<number>();
-  /** true una vez que la sala lo desvió: sigue por `DESVIO`, no por `GUION`. */
+  /** lo ya hecho; es el contexto que recibe el modelo en cada llamada. */
+  readonly #previos: { n: number; texto: string; estado: string }[] = [];
+  /** reglas que la sala le fijó; viajan al modelo en cada paso. */
+  #restricciones: string[] = [];
+  /** el plan pendiente de ejecutar; se rellena con una sola llamada. */
+  #plan: { texto: string; riesgo: Paso["riesgo"]; confianza: number }[] = [];
+  /** qué produjo el plan actual, para mostrarlo en la UI. */
+  #fuente = "—";
+  /** true una vez que la sala lo desvió. */
   #desviado = false;
+  #motivoDesvio: string | undefined;
   /** numeración global de pasos; nunca se reinicia. */
   #n = 0;
+  /** un tick no arranca si el modelo todavía está pensando el anterior. */
+  #pensando = false;
   #corriendo = false;
 
   constructor(
     transporte: Transporte,
     leerSala: () => Sala,
     eventos: EventosAgente = {},
+    tarea = "Investigar si los agentes colaborativos saturan a los usuarios, y con qué evidencia",
   ) {
     this.#transporte = transporte;
     this.#leerSala = leerSala;
     this.#eventos = eventos;
+    this.#tarea = tarea;
     this.politica = new Politica();
+  }
+
+  /** La sala fijó una regla nueva; el modelo la verá en el próximo paso. */
+  fijarRestriccion(texto: string): void {
+    this.#restricciones.push(texto);
   }
 
   get corriendo(): boolean {
@@ -142,8 +140,11 @@ export class AgenteSimulado {
     // preguntarlo después de un cambio de rumbo.
     this.politica.reiniciar();
     this.#aprobados.clear();
+    // El plan viejo pertenecía a la línea abandonada: se tira entero y el
+    // modelo replanifica sabiendo por qué lo desviaron.
+    this.#plan = [];
     this.#desviado = true;
-    this.#indice = 0;
+    this.#motivoDesvio = motivo;
     await this.#transporte.publicar({ tipo: "interrupcion", interrupcion: { motivo } });
 
     // Si estaba parado (por ejemplo, ya había terminado), el desvío lo revive.
@@ -171,13 +172,29 @@ export class AgenteSimulado {
   }
 
   async #tick(): Promise<void> {
-    if (!this.#corriendo) return;
+    if (!this.#corriendo || this.#pensando) return;
 
-    const paso = this.#enElAire ?? this.#siguientePaso();
+    let paso = this.#enElAire;
+    let fuente = "reintento";
+    let degradado: string | undefined;
+
     if (!paso) {
-      this.parar();
-      this.#eventos.onFin?.();
-      return;
+      this.#pensando = true;
+      try {
+        const propuesto = await this.#siguientePaso();
+        if (!propuesto) {
+          this.parar();
+          this.#eventos.onFin?.();
+          return;
+        }
+        paso = propuesto.paso;
+        fuente = propuesto.fuente;
+        degradado = propuesto.degradado;
+      } finally {
+        this.#pensando = false;
+      }
+      // Mientras el modelo pensaba, la sala pudo pararlo.
+      if (!this.#corriendo) return;
     }
 
     // Un paso ya aprobado no se vuelve a consultar: la sala ya dijo que sí.
@@ -194,6 +211,8 @@ export class AgenteSimulado {
       paso,
       decision: r.decision,
       pendientes: this.politica.pendientes.length,
+      fuente,
+      degradado,
     });
 
     switch (r.decision) {
@@ -222,25 +241,80 @@ export class AgenteSimulado {
     }
   }
 
-  #siguientePaso(): Paso | undefined {
-    const linea = this.#desviado ? DESVIO : GUION;
-    if (this.#indice >= linea.length) return undefined;
-    const g = linea[this.#indice];
-    this.#indice += 1;
-    // `n` es un contador propio, no el índice de la línea: tras un desvío el
-    // índice vuelve a 0 pero la numeración de pasos NO puede reiniciarse, o
-    // los pasos nuevos pisarían a los viejos en la vista.
+  /**
+   * Saca el siguiente paso del plan, pidiendo uno nuevo si hace falta.
+   *
+   * Devuelve `undefined` cuando la tarea terminó o cuando ni el modelo ni el
+   * respaldo dieron nada: mejor detenerse que girar en vacío.
+   */
+  async #siguientePaso(): Promise<
+    { paso: Paso; fuente: string; degradado?: string } | undefined
+  > {
+    let degradado: string | undefined;
+
+    if (this.#plan.length === 0) {
+      const r = await this.#planear();
+      if (!r) return undefined;
+      degradado = r.degradado;
+    }
+
+    const g = this.#plan.shift();
+    if (!g) return undefined;
+
+    // `n` es un contador propio y nunca se reinicia: tras un desvío los pasos
+    // nuevos no pueden pisar a los viejos en la vista.
     this.#n += 1;
     return {
-      n: this.#n,
-      texto: g.texto,
-      riesgo: g.riesgo,
-      confianza: g.confianza,
-      estado: "ejecutando",
+      paso: {
+        n: this.#n,
+        texto: g.texto,
+        riesgo: g.riesgo,
+        confianza: g.confianza,
+        estado: "ejecutando",
+      },
+      fuente: this.#fuente,
+      degradado,
     };
   }
 
+  /** Una sola llamada al modelo. Aquí es donde se paga la latencia. */
+  async #planear(): Promise<{ degradado?: string } | undefined> {
+    this.#eventos.onPlaneando?.(true);
+    try {
+      const res = await fetch("/api/paso", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          tarea: this.#tarea,
+          previos: this.#previos,
+          restricciones: this.#restricciones,
+          desviado: this.#desviado,
+          motivoDesvio: this.#motivoDesvio,
+        }),
+      });
+      if (!res.ok) throw new Error(`/api/paso respondió ${res.status}`);
+      const datos = (await res.json()) as RespuestaPlan;
+
+      this.#plan = datos.pasos?.filter((p) => p.texto) ?? [];
+      this.#fuente = datos.fuente;
+      if (this.#plan.length === 0) return undefined;
+      return { degradado: datos.degradado };
+    } catch (e) {
+      console.error("[agente] no pude planear", e);
+      return undefined;
+    } finally {
+      this.#eventos.onPlaneando?.(false);
+    }
+  }
+
   #publicarPaso(paso: Paso): Promise<void> {
+    // El historial que ve el modelo se lleva aquí, no en la UI: es lo que le
+    // impide repetirse y lo que le dice qué línea abandonó tras un desvío.
+    const i = this.#previos.findIndex((p) => p.n === paso.n);
+    const entrada = { n: paso.n, texto: paso.texto, estado: paso.estado };
+    if (i >= 0) this.#previos[i] = entrada;
+    else this.#previos.push(entrada);
+
     return this.#transporte.publicar({ tipo: "paso", paso });
   }
 

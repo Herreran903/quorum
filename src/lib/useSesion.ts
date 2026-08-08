@@ -92,6 +92,12 @@ export interface UseSesion {
   /** la pregunta que tiene frenado al agente en ESTA pestaña, si la hay */
   preguntaAbierta: Pregunta | undefined;
   ultimaDecision: string | undefined;
+  /** el modelo que produjo el plan, o "guion" si se cayó */
+  fuente: string | undefined;
+  /** mensaje del fallo cuando se degradó al guion */
+  degradado: string | undefined;
+  /** true mientras el modelo arma el plan */
+  planeando: boolean;
 
   arrancarAgente: () => void;
   pararAgente: () => void;
@@ -109,6 +115,11 @@ export function useSesion(idSesion: string): UseSesion {
   const [yo, setYo] = useState<string | undefined>(undefined);
   const [agenteCorriendo, setAgenteCorriendo] = useState(false);
   const [ultimaDecision, setUltimaDecision] = useState<string | undefined>();
+  /** qué modelo produjo el plan actual; se muestra para que no parezca guion */
+  const [fuente, setFuente] = useState<string | undefined>();
+  /** mensaje del fallo si el modelo se cayó y respondió el guion */
+  const [degradado, setDegradado] = useState<string | undefined>();
+  const [planeando, setPlaneando] = useState(false);
 
   const transporteRef = useRef<Transporte | null>(null);
   const agenteRef = useRef<AgenteSimulado | null>(null);
@@ -173,12 +184,15 @@ export function useSesion(idSesion: string): UseSesion {
     const t = transporteRef.current;
     if (!t || agenteRef.current) return;
     const agente = new AgenteSimulado(t, leerSala, {
-      onDecision: ({ paso, decision, pendientes }) => {
+      onDecision: ({ paso, decision, pendientes, fuente, degradado }) => {
         setUltimaDecision(
           `paso ${paso.n} → ${decision}` +
             (pendientes > 0 ? ` · ${pendientes} en cola` : ""),
         );
+        if (fuente !== "reintento") setFuente(fuente);
+        setDegradado(degradado);
       },
+      onPlaneando: setPlaneando,
       onFin: () => setAgenteCorriendo(false),
     });
     agenteRef.current = agente;
@@ -213,6 +227,9 @@ export function useSesion(idSesion: string): UseSesion {
   }, []);
 
   const fijarRestriccion = useCallback((texto: string) => {
+    // La regla viaja al canal para que la vea toda la sala, Y al agente, que
+    // se la pasa al modelo en el próximo paso.
+    agenteRef.current?.fijarRestriccion(texto);
     void transporteRef.current?.publicar({
       tipo: "restriccion",
       restriccion: { id: Math.random().toString(36).slice(2, 10), texto },
@@ -242,6 +259,9 @@ export function useSesion(idSesion: string): UseSesion {
     agenteCorriendo,
     preguntaAbierta,
     ultimaDecision,
+    fuente,
+    degradado,
+    planeando,
     arrancarAgente,
     pararAgente,
     responder,

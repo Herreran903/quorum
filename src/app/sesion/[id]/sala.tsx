@@ -24,6 +24,7 @@ export function Sala({ idSesion }: { idSesion: string }) {
           <h1 className="text-base font-bold">quorum · {idSesion}</h1>
           <p className="text-xs text-neutral-500">
             transporte: {s.transporte} · conexión: {s.conexion}
+            {s.fuente && <> · modelo: {s.fuente}</>}
           </p>
         </div>
         <Presencia
@@ -46,10 +47,19 @@ export function Sala({ idSesion }: { idSesion: string }) {
         >
           interrumpir
         </button>
-        {s.ultimaDecision && (
+        {s.planeando && (
+          <span className="text-xs text-sky-400">el modelo está planeando…</span>
+        )}
+        {!s.planeando && s.ultimaDecision && (
           <span className="text-xs text-neutral-500">{s.ultimaDecision}</span>
         )}
       </section>
+
+      {s.degradado && (
+        <p className="rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-400">
+          el modelo falló, siguiendo con el guion de respaldo — {s.degradado}
+        </p>
+      )}
 
       {s.sala.escribiendo && (
         <p className="rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-400">
