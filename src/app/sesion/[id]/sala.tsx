@@ -7,6 +7,7 @@ import type { Paso } from "@/lib/protocolo";
 import { familiaDeConfianza } from "@/lib/tipografia";
 import { quienMira, type Espectador, type Presencia } from "@/lib/transporte";
 import { Veta } from "./veta";
+import { EstadoTablero } from "@/components/tablero";
 
 const APODOS = ["ana", "beto", "cami", "dani", "eli", "fran", "gabo", "hugo"];
 
@@ -167,73 +168,6 @@ function palabraDeEstado({
   if (preguntando) return "PREGUNTA";
   if (!corriendo) return "QUIETA";
   return testigos === 0 ? "SOLA" : "VISTA";
-}
-
-const GLIFOS_TABLERO = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-/**
- * El tablero de estación. Cuando el estado cambia, cada letra cicla glifos
- * antes de asentarse — el volteo de un split-flap, sin renderizar un solo
- * disco: el movimiento ES la identidad, no el skeuomorfismo.
- *
- * Con prefers-reduced-motion la palabra cambia en seco: el cambio de estado
- * se conserva, el desplazamiento se quita.
- */
-function EstadoTablero({ palabra, testigos }: { palabra: string; testigos: number }) {
-  /** la palabra en pleno volteo; null = asentada, se muestra `palabra` */
-  const [ciclo, setCiclo] = useState<string | null>(null);
-  const anterior = useRef(palabra);
-
-  useEffect(() => {
-    if (palabra === anterior.current) return;
-    anterior.current = palabra;
-
-    // Reducido: el cambio de estado se conserva, el volteo se quita.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    let cuadro = 0;
-    const timer = setInterval(() => {
-      cuadro++;
-      let salida = "";
-      for (let i = 0; i < palabra.length; i++) {
-        // Cada letra se asienta por orden: el volteo recorre la palabra.
-        const asienta = 3 + i * 2;
-        salida +=
-          cuadro >= asienta
-            ? palabra[i]
-            : GLIFOS_TABLERO[Math.floor(Math.random() * GLIFOS_TABLERO.length)];
-      }
-      if (cuadro >= 3 + palabra.length * 2) {
-        setCiclo(null);
-        clearInterval(timer);
-      } else {
-        setCiclo(salida);
-      }
-    }, 45);
-    return () => clearInterval(timer);
-  }, [palabra]);
-
-  /**
-   * El peso de la palabra ES la atención de la sala: con nadie mirando los
-   * discos apenas se encienden; cada testigo que entra la engorda. Dato
-   * hecho forma — y la fuente variable lo transiciona sola.
-   */
-  const peso = 380 + Math.min(testigos, 5) * 90;
-
-  return (
-    <h1
-      className="text-estado"
-      style={{
-        fontFamily: "var(--font-tablero)",
-        // Verificado en vivo contra los 17 valores del eje: ELSH 9 es el que
-        // deja VER los discos individuales; con más peso se funden en barra.
-        fontVariationSettings: `"ELSH" 9, "wght" ${peso}`,
-        transition: "font-variation-settings 400ms cubic-bezier(0.23, 1, 0.32, 1)",
-      }}
-    >
-      {ciclo ?? palabra}
-    </h1>
-  );
 }
 
 /**
