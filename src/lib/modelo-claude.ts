@@ -4,8 +4,21 @@
  * Corre solo en el servidor (ver `app/api/turno/route.ts`): la llave nunca
  * debe pisar el bundle del navegador.
  *
- * Se usa un modelo rápido por defecto: hay una llamada por turno, así que la
- * latencia se paga en cada intervención y el chat tiene que sentirse vivo.
+ * Este camino no se puede probar sin ANTHROPIC_API_KEY, así que cada decisión
+ * de aquí va verificada contra la referencia del API — no contra memoria:
+ *
+ * - `claude-opus-5` por defecto. El default anterior (claude-3-5-haiku-
+ *   20241022) fue RETIRADO en febrero de 2026 y devuelve 404: el estreno en
+ *   vivo habría fallado en el primer turno. `ANTHROPIC_MODEL` sigue siendo el
+ *   override para quien prefiera otra cosa (p. ej. `claude-haiku-4-5` si la
+ *   latencia manda sobre la calidad — esa decisión es del dueño, no nuestra).
+ * - Sin `temperature`: los modelos actuales rechazan los parámetros de
+ *   muestreo con un 400. El estilo se dirige desde el prompt.
+ * - `effort: "low"`: hay una llamada por turno de chat y la sala tiene que
+ *   sentirse viva; low en Opus 5 rinde por encima de su peso y recorta
+ *   latencia y tokens. El thinking queda en su default (adaptativo).
+ * - `max_tokens` cubre thinking MÁS respuesta en Opus 5: los topes viejos
+ *   (2000/200) truncarían el turno a mitad del pensamiento.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -22,8 +35,9 @@ import {
   type Turno,
 } from "./modelo-turno";
 
-const MODELO_POR_DEFECTO = "claude-3-5-haiku-20241022";
-const TIMEOUT_MS = 30_000;
+const MODELO_POR_DEFECTO = "claude-opus-5";
+/** Con thinking adaptativo un turno puede pensar antes de hablar. */
+const TIMEOUT_MS = 60_000;
 
 export class ModeloClaude implements ModeloTurno {
   readonly nombre: string;
@@ -37,7 +51,7 @@ export class ModeloClaude implements ModeloTurno {
   }
 
   async siguienteTurno(ctx: ContextoTurno): Promise<Turno> {
-    const crudo = await this.#pedir(construirPromptTurno(ctx), 2000);
+    const crudo = await this.#pedir(construirPromptTurno(ctx), 6000);
     const turno = sanearTurno(extraerJson(crudo));
     if (!turno) throw new Error(`Claude devolvió un turno inservible: ${crudo.slice(0, 200)}`);
     return turno;
@@ -45,7 +59,7 @@ export class ModeloClaude implements ModeloTurno {
 
   /** ¿Estos dos pedidos se contradicen? Es lo que abre una votación. */
   async hayConflicto(a: string, b: string): Promise<Conflicto> {
-    const crudo = await this.#pedir(construirPromptConflicto(a, b), 200);
+    const crudo = await this.#pedir(construirPromptConflicto(a, b), 1500);
     return sanearConflicto(extraerJson(crudo));
   }
 
@@ -53,9 +67,16 @@ export class ModeloClaude implements ModeloTurno {
     const res = await this.#cliente.messages.create({
       model: this.nombre,
       max_tokens: maxTokens,
-      temperature: 0.7,
+      output_config: { effort: "low" },
       messages: [{ role: "user", content: prompt }],
     });
+
+    // Los clasificadores pueden declinar con HTTP 200: hay que mirar
+    // stop_reason antes de leer content. El throw degrada al guion local.
+    if (res.stop_reason === "refusal") {
+      throw new Error("Claude declinó el turno (refusal)");
+    }
+
     const bloque = res.content.find((b) => b.type === "text");
     const texto = bloque?.type === "text" ? bloque.text : undefined;
     if (!texto) throw new Error("Claude devolvió una respuesta vacía");
