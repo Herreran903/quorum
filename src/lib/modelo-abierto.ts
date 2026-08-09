@@ -11,6 +11,12 @@
  * más SALA_MODELO_NOMBRE (el id del modelo) y SALA_MODELO_KEY si el proveedor
  * la exige. La ruta lo elige cuando no hay ANTHROPIC_API_KEY.
  *
+ * SALA_MODELO_RAZONAMIENTO (p. ej. "low") acota cuánto piensa un modelo
+ * razonador antes de escribir. Los Gemini 3.x piensan por defecto y sin esto
+ * el presupuesto de tokens se va entero en razonamiento — respuesta vacía con
+ * `finish_reason: length`, medido. Es opcional porque no todos lo aceptan:
+ * Ollama devuelve 400 con modelos que no piensan.
+ *
  * Va con fetch a propósito: instalar el SDK de un proveedor por endpoint
  * mataría la gracia de que TODOS expongan el mismo endpoint.
  */
@@ -34,6 +40,7 @@ export class ModeloAbierto implements ModeloTurno {
   readonly nombre: string;
   readonly #url: string;
   readonly #llave: string | undefined;
+  readonly #razonamiento: string | undefined;
 
   constructor() {
     const base = process.env.SALA_MODELO_URL;
@@ -43,6 +50,7 @@ export class ModeloAbierto implements ModeloTurno {
     this.#url = base.replace(/\/+$/, "") + "/chat/completions";
     this.nombre = nombre;
     this.#llave = process.env.SALA_MODELO_KEY || undefined;
+    this.#razonamiento = process.env.SALA_MODELO_RAZONAMIENTO || undefined;
   }
 
   async siguienteTurno(ctx: ContextoTurno): Promise<Turno> {
@@ -70,6 +78,7 @@ export class ModeloAbierto implements ModeloTurno {
       body: JSON.stringify({
         model: this.nombre,
         max_tokens: maxTokens,
+        ...(this.#razonamiento ? { reasoning_effort: this.#razonamiento } : {}),
         messages: [{ role: "user", content: prompt }],
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
