@@ -42,11 +42,12 @@ export interface MensajeEnChat extends Mensaje {
   at: number;
 }
 
-/** Un voto con quién lo emitió. */
+/** Un voto con quién lo emitió y cuándo. */
 export interface VotoEnChat {
   votacionId: string;
   opcionId: string;
   emisor: string;
+  at: number;
 }
 
 export interface EstadoChat {
@@ -108,7 +109,7 @@ export function reducir(estado: EstadoChat, sobre: Sobre): EstadoChat {
         (v) => v.votacionId === c.voto.votacionId && v.emisor === sobre.emisor,
       );
       const votos = [...estado.votos];
-      const nuevo: VotoEnChat = { ...c.voto, emisor: sobre.emisor };
+      const nuevo: VotoEnChat = { ...c.voto, emisor: sobre.emisor, at: sobre.at };
       if (i >= 0) votos[i] = nuevo;
       else votos.push(nuevo);
       return { ...estado, votos };
@@ -267,7 +268,11 @@ export function derivarConductor(estado: EstadoChat, ahora: number): string | un
   return undefined;
 }
 
-export function derivarInstrucciones(estado: EstadoChat, ahora: number): Instruccion[] {
+export function derivarInstrucciones(
+  estado: EstadoChat,
+  ahora: number,
+  notados: ReadonlyMap<string, number> = new Map(),
+): Instruccion[] {
   const atendidos = new Set<string>();
   for (const m of estado.mensajes) {
     if (!m.deAgente) continue;
@@ -284,7 +289,7 @@ export function derivarInstrucciones(estado: EstadoChat, ahora: number): Instruc
    * votar: la decisión se deshacía sola y en silencio.
    */
   const descartadas = new Set<string>();
-  for (const r of derivarResueltas(estado, ahora)) {
+  for (const r of derivarResueltas(estado, ahora, notados)) {
     for (const o of r.votacion.opciones) {
       if (o.id !== r.ganadora.id) descartadas.add(o.id);
     }
@@ -332,12 +337,98 @@ function opcionesVivas(v: Votacion, estado: EstadoChat): OpcionVoto[] {
   return v.opciones.filter((o) => !estado.retiros.has(o.id));
 }
 
+/** Cuánto se acorta el cierre una vez que ya votaron todos los presentes. */
+const CIERRE_TODOS_VOTARON_MS = 3_000;
+
+/** Cuánta gente distinta hay conectada ahora — el "todos" de una votación. */
+function totalPresentes(presencia: Presencia): number {
+  return presencia.detallada ? presencia.espectadores.length : presencia.total;
+}
+
+/**
+ * El cierre real de una votación: el programado, o `CIERRE_TODOS_VOTARON_MS`
+ * después de que ESTE cliente notó que ya votaron todos los presentes — lo
+ * que llegue antes.
+ *
+ * Pura y de solo lectura a propósito: consulta `notados` (por votación, el
+ * `ahora` LOCAL en que se detectó el consenso) pero nunca lo escribe. Eso lo
+ * hace `notarConsensoDeVoto`.
+ *
+ * El ancla es SIEMPRE el reloj de quien consulta, nunca el `at` de un voto
+ * ajeno: ese `at` puede venir del reloj de otra persona o del servidor, y
+ * comparado contra el propio `Date.now()`, cualquier diferencia angosta la
+ * ventana de 3s — con poca diferencia alcanza para dejarla en cero y que la
+ * votación se cierre casi al instante, sin que nadie llegue a cambiar su voto.
+ */
+export function cierreEfectivo(v: Votacion, notados: ReadonlyMap<string, number>): number {
+  const notadoEn = notados.get(v.id);
+  return notadoEn === undefined ? v.cierraEn : Math.min(v.cierraEn, notadoEn + CIERRE_TODOS_VOTARON_MS);
+}
+
+/**
+ * Revisa si algún voto abierto ya juntó a todos los presentes y, si es la
+ * primera vez que lo nota, lo anota contra `ahora` — SIEMPRE el reloj de
+ * quien llama, nunca el de un voto ajeno.
+ *
+ * Devuelve el mismo `notados` (misma referencia) si no hay nada que cambiar
+ * — el llamador (el cuerpo del componente, ver `useChat`) compara por
+ * referencia para decidir si hace falta `setState`, siguiendo el patrón que
+ * React documenta para ajustar estado durante el render sin el commit-de-más
+ * de un efecto que llama `setState` sin condición.
+ *
+ * Cambiar de opción una vez notado el consenso NO lo reinicia — si
+ * reiniciara, dos personas alternando voto podrían dejar la votación abierta
+ * para siempre. Si en cambio se suma alguien presente que todavía no votó, el
+ * consenso anotado se olvida: vuelve a haber algo por esperar.
+ */
+export function notarConsensoDeVoto(
+  estado: EstadoChat,
+  presencia: Presencia,
+  notados: ReadonlyMap<string, number>,
+  ahora: number,
+): ReadonlyMap<string, number> {
+  const total = totalPresentes(presencia);
+  if (total <= 0) return notados;
+
+  let siguiente: Map<string, number> | undefined;
+  for (const v of estado.votaciones) {
+    if (ahora >= v.cierraEn || opcionesVivas(v, estado).length <= 1) continue;
+
+    const votantesUnicos = new Set(
+      estado.votos.filter((vo) => vo.votacionId === v.id).map((vo) => vo.emisor),
+    );
+    const yaNotado = (siguiente ?? notados).has(v.id);
+
+    if (votantesUnicos.size < total) {
+      if (yaNotado) {
+        siguiente = new Map(siguiente ?? notados);
+        siguiente.delete(v.id);
+      }
+      continue;
+    }
+    if (!yaNotado) {
+      siguiente = new Map(siguiente ?? notados);
+      siguiente.set(v.id, ahora);
+    }
+  }
+  return siguiente ?? notados;
+}
+
 /**
  * Si ya no queda más de una opción viva, la votación no tiene nada que
  * dirimir: no hace falta esperar el reloj para darla por resuelta.
+ *
+ * `notados` es opcional: sin él (p. ej. en un test que no arma una sala
+ * entera) nunca hay un consenso registrado, así que se comporta como antes —
+ * cierre fijo por reloj.
  */
-function estaResuelta(v: Votacion, estado: EstadoChat, ahora: number): boolean {
-  return ahora >= v.cierraEn || opcionesVivas(v, estado).length <= 1;
+function estaResuelta(
+  v: Votacion,
+  estado: EstadoChat,
+  ahora: number,
+  notados: ReadonlyMap<string, number> = new Map(),
+): boolean {
+  return ahora >= cierreEfectivo(v, notados) || opcionesVivas(v, estado).length <= 1;
 }
 
 function contar(estado: EstadoChat, v: Votacion): Record<string, number> {
@@ -360,16 +451,23 @@ export interface Resuelta {
  * misma decisión sin depender de que alguien la haya publicado — ni de que
  * hubiera alguien conduciendo al agente cuando venció el plazo.
  */
-function derivarResueltas(estado: EstadoChat, ahora: number): Resuelta[] {
+function derivarResueltas(
+  estado: EstadoChat,
+  ahora: number,
+  notados: ReadonlyMap<string, number> = new Map(),
+): Resuelta[] {
   return estado.votaciones
-    .filter((v) => estaResuelta(v, estado, ahora))
+    .filter((v) => estaResuelta(v, estado, ahora, notados))
     .map((v) => {
       const conteo = contar(estado, v);
       // Si a alguien le retiraron TODAS las opciones (los dos lados se
       // bajaron), no hay entre qué elegir: la primera queda como testigo.
       const vivas = opcionesVivas(v, estado);
       const ganadora = ganadoraDe(vivas.length > 0 ? { ...v, opciones: vivas } : v, conteo);
-      return { votacion: v, ganadora, conteo };
+      // El cierre efectivo queda en el registro: la transcripción y el resto
+      // de la UI lo leen de `votacion.cierraEn` sin saber que se acortó.
+      const votacion = { ...v, cierraEn: cierreEfectivo(v, notados) };
+      return { votacion, ganadora, conteo };
     });
 }
 
@@ -377,16 +475,23 @@ function textoDecision(r: Resuelta): string {
   return `Sobre "${r.votacion.motivo}", el equipo eligió: ${r.ganadora.texto}`;
 }
 
-/** Lo que el agente necesita saber, en el instante en que lo pregunta. */
+/**
+ * Lo que el agente necesita saber, en el instante en que lo pregunta.
+ *
+ * `notados` es el MISMO mapa que usa el resto del hook — así el "todos
+ * votaron" que nota el agente y el que nota la UI son un único momento, no
+ * dos relojes corriendo por separado. Ver `cierreEfectivo`/`notarConsensoDeVoto`.
+ */
 function derivarVista(
   estado: EstadoChat,
   presencia: Presencia,
   ahora: number,
   yo: string | undefined,
+  notados: ReadonlyMap<string, number>,
 ): VistaAgente {
   const perfil = derivarPerfil(estado, presencia);
-  const instrucciones = derivarInstrucciones(estado, ahora);
-  const votacionAbierta = estado.votaciones.find((v) => !estaResuelta(v, estado, ahora));
+  const instrucciones = derivarInstrucciones(estado, ahora, notados);
+  const votacionAbierta = estado.votaciones.find((v) => !estaResuelta(v, estado, ahora, notados));
   const conductor = derivarConductor(estado, ahora);
 
   // El modelo ve los nombres reales: así puede decir "le agrego lo que pidió
@@ -419,7 +524,7 @@ function derivarVista(
       autor: perfil(i.emisor).nombre,
       texto: i.texto,
     })),
-    decisiones: derivarResueltas(estado, ahora).map(textoDecision),
+    decisiones: derivarResueltas(estado, ahora, notados).map(textoDecision),
     artefacto: armarArtefacto(estado.trozos),
     votacionAbierta,
     conteo: votacionAbierta ? contar(estado, votacionAbierta) : {},
@@ -541,10 +646,40 @@ export function useChat(idSala: string): UseChat {
   const estadoRef = useRef<EstadoChat>(VACIO);
   const presenciaRef = useRef<Presencia>(PRESENCIA_VACIA);
 
+  /**
+   * Por votación: el `ahora` LOCAL en que este cliente notó que ya votaron
+   * todos los presentes. Ver `cierreEfectivo`.
+   *
+   * Va como estado, no como ref: leer un ref durante el render es justo la
+   * clase de lectura impura que React rechaza — puede quedar desincronizada
+   * del resto del render.
+   *
+   * Se ajusta DURANTE el render, no en un `useEffect`: es el patrón que React
+   * documenta para "derivar estado de un cambio" sin el commit-de-más que
+   * deja un efecto llamando `setState` sin condición. `notarConsensoDeVoto`
+   * devuelve la MISMA referencia cuando no hay nada nuevo que notar, así que
+   * esto es un no-op en la enorme mayoría de los renders.
+   *
+   * El ancla es `ahora` —el reloj de 1s que ya vive en estado, arriba— y no
+   * `Date.now()`: React exige que el render sea puro, y `Date.now()` no lo
+   * es. El costo es hasta ~1s de holgura en cuándo se nota el consenso, nunca
+   * más — de sobra para una ventana pensada en segundos.
+   */
+  const [notados, setNotados] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const notadosAhora = notarConsensoDeVoto(estado, presencia, notados, ahora);
+  if (notadosAhora !== notados) setNotados(notadosAhora);
+
+  /** Espejo para `ver()`, igual que `estadoRef`/`presenciaRef`: el agente lee fuera del render. */
+  const notadosRef = useRef(notados);
+
   useEffect(() => {
     const t = setInterval(() => setAhora(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    notadosRef.current = notados;
+  }, [notados]);
 
   // ------------------------------------------------------------- derivados
 
@@ -552,13 +687,19 @@ export function useChat(idSala: string): UseChat {
 
   const perfil = useMemo(() => derivarPerfil(estado, presencia), [estado, presencia]);
 
-  const instrucciones = useMemo(() => derivarInstrucciones(estado, ahora), [estado, ahora]);
+  const instrucciones = useMemo(
+    () => derivarInstrucciones(estado, ahora, notados),
+    [estado, ahora, notados],
+  );
 
   const votacionAbierta = useMemo(() => {
-    const v = estado.votaciones.find((vv) => !estaResuelta(vv, estado, ahora));
+    const v = estado.votaciones.find((vv) => !estaResuelta(vv, estado, ahora, notados));
+    if (!v) return undefined;
     // La UI solo debe ofrecer las opciones vivas: la retirada ya no se vota.
-    return v ? { ...v, opciones: opcionesVivas(v, estado) } : undefined;
-  }, [estado, ahora]);
+    // El cierre acortado también va acá: es lo que lee la cuenta regresiva
+    // del modal, sin que este tenga que saber nada de "todos votaron".
+    return { ...v, opciones: opcionesVivas(v, estado), cierraEn: cierreEfectivo(v, notados) };
+  }, [estado, ahora, notados]);
 
   const conteo = useMemo(
     () => (votacionAbierta ? contar(estado, votacionAbierta) : {}),
@@ -570,7 +711,10 @@ export function useChat(idSala: string): UseChat {
     [votacionAbierta, estado.votos],
   );
 
-  const resueltas = useMemo(() => derivarResueltas(estado, ahora), [estado, ahora]);
+  const resueltas = useMemo(
+    () => derivarResueltas(estado, ahora, notados),
+    [estado, ahora, notados],
+  );
 
   const decisiones = useMemo(() => resueltas.map(textoDecision), [resueltas]);
 
@@ -726,7 +870,13 @@ export function useChat(idSala: string): UseChat {
     agenteRef.current?.detener();
 
     const ver = () =>
-      derivarVista(estadoRef.current, presenciaRef.current, Date.now(), yoRef.current);
+      derivarVista(
+        estadoRef.current,
+        presenciaRef.current,
+        Date.now(),
+        yoRef.current,
+        notadosRef.current,
+      );
     const agente = new AgenteChat(t, ver, {
       onPensando: setPensando,
       onFuente: (f, d) => {

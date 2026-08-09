@@ -4,15 +4,18 @@ import {
   VACIO,
   VENTANA_CONDUCCION_MS,
   armarArtefacto,
+  cierreEfectivo,
   derivarConductor,
   derivarInstrucciones,
+  notarConsensoDeVoto,
   pendienteActivo,
   pendientesVivos,
   reducir,
   type EstadoChat,
 } from "./useChat";
 import { presupuestoDeTexto, trocear } from "./agente-chat";
-import type { Cuerpo, Sobre, TrozoArtefacto } from "./protocolo";
+import type { Cuerpo, Sobre, TrozoArtefacto, Votacion } from "./protocolo";
+import type { Presencia } from "./transporte";
 
 let n = 0;
 function sobre(cuerpo: Cuerpo, emisor = "ana", at = 1000): Sobre {
@@ -83,6 +86,144 @@ describe("reducir — votos", () => {
       sobre({ tipo: "voto", voto: { votacionId: "v2", opcionId: "a" } }, "ana"),
     ]);
     expect(e.votos).toHaveLength(2);
+  });
+
+  it("guarda cuándo se votó, aunque el cuerpo no lo declare", () => {
+    const e = aplicar([sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "a" } }, "ana", 5000)]);
+    expect(e.votos[0].at).toBe(5000);
+  });
+});
+
+describe("cierreEfectivo", () => {
+  const votacion: Votacion = {
+    id: "v1",
+    motivo: "chocan",
+    opciones: [
+      { id: "m1", texto: "en prosa" },
+      { id: "m2", texto: "en verso" },
+    ],
+    cierraEn: 20_000,
+  };
+
+  it("sin nada notado, el cierre es el programado", () => {
+    expect(cierreEfectivo(votacion, new Map())).toBe(20_000);
+  });
+
+  it("con un consenso notado, el cierre es 3s después de ese momento", () => {
+    expect(cierreEfectivo(votacion, new Map([["v1", 9000]]))).toBe(9000 + 3000);
+  });
+
+  it("si el cierre programado ya era más cercano, gana el programado", () => {
+    const yaPorCerrar: Votacion = { ...votacion, cierraEn: 9500 };
+    expect(cierreEfectivo(yaPorCerrar, new Map([["v1", 9000]]))).toBe(9500);
+  });
+
+  it("un consenso notado de OTRA votación no la afecta", () => {
+    expect(cierreEfectivo(votacion, new Map([["otra-votacion", 9000]]))).toBe(20_000);
+  });
+});
+
+describe("notarConsensoDeVoto", () => {
+  const votacion: Votacion = {
+    id: "v1",
+    motivo: "chocan",
+    opciones: [
+      { id: "m1", texto: "en prosa" },
+      { id: "m2", texto: "en verso" },
+    ],
+    cierraEn: 20_000,
+  };
+
+  function presentes(...ids: string[]): Presencia {
+    return {
+      total: ids.length,
+      detallada: true,
+      espectadores: ids.map((id) => ({ id, escribiendo: false, soyYo: false })),
+    };
+  }
+
+  it("sin presencia (nadie contado como 'todos'), no anota nada", () => {
+    const e = aplicar([sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000)]);
+    const vacia: Presencia = { total: 0, detallada: true, espectadores: [] };
+    expect(notarConsensoDeVoto(e, vacia, new Map(), 1000).size).toBe(0);
+  });
+
+  it("si todavía no votaron todos los presentes, no anota nada", () => {
+    const e = aplicar([sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000)]);
+    expect(notarConsensoDeVoto(e, presentes("ana", "beto"), new Map(), 1000).size).toBe(0);
+  });
+
+  it("cuando votó el último presente, anota el AHORA que se le pasa — no el sello del voto", () => {
+    const e = aplicar([
+      sobre({ tipo: "votacion", votacion }, "ana", 500),
+      // El voto de beto trae un sello (5000) que podría venir de un reloj
+      // ajeno — lo que importa es el `ahora` de quien llama (9000).
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "beto", 5000),
+    ]);
+    const notados = notarConsensoDeVoto(e, presentes("ana", "beto"), new Map(), 9000);
+    expect(notados.get("v1")).toBe(9000);
+  });
+
+  it("una segunda consulta no pisa el primer momento en que se notó", () => {
+    const e = aplicar([
+      sobre({ tipo: "votacion", votacion }, "ana", 500),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "beto", 5000),
+    ]);
+    const primero = notarConsensoDeVoto(e, presentes("ana", "beto"), new Map(), 9000);
+    const segundo = notarConsensoDeVoto(e, presentes("ana", "beto"), primero, 9500);
+    expect(segundo.get("v1")).toBe(9000);
+    // Sin nada que cambiar, devuelve la MISMA referencia — así un `setState`
+    // con esto de updater no dispara un re-render de más.
+    expect(segundo).toBe(primero);
+  });
+
+  it("re-votar (cambiar de opción) no cuenta dos veces a la misma persona", () => {
+    const e = aplicar([
+      sobre({ tipo: "votacion", votacion }, "ana", 500),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "ana", 2000),
+    ]);
+    // Solo "ana" votó; con dos presentes todavía falta "beto".
+    expect(notarConsensoDeVoto(e, presentes("ana", "beto"), new Map(), 2000).size).toBe(0);
+  });
+
+  it("cambiar el voto después de que todos votaron no reinicia la cuenta", () => {
+    const e1 = aplicar([
+      sobre({ tipo: "votacion", votacion }, "ana", 500),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "beto", 5000),
+    ]);
+    const notados = notarConsensoDeVoto(e1, presentes("ana", "beto"), new Map(), 9000);
+
+    const e2 = aplicar(
+      [sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "ana", 9200)],
+      e1,
+    );
+    const otraVez = notarConsensoDeVoto(e2, presentes("ana", "beto"), notados, 9300);
+    expect(otraVez.get("v1")).toBe(9000);
+  });
+
+  it("si se suma alguien presente que no votó, se olvida el consenso anterior", () => {
+    const e = aplicar([
+      sobre({ tipo: "votacion", votacion }, "ana", 500),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "beto", 5000),
+    ]);
+    const notados = notarConsensoDeVoto(e, presentes("ana", "beto"), new Map(), 9000);
+    // Ahora hay un tercero presente que todavía no votó.
+    const conNuevo = notarConsensoDeVoto(e, presentes("ana", "beto", "carla"), notados, 9500);
+    expect(conNuevo.has("v1")).toBe(false);
+  });
+
+  it("una votación ya vencida por reloj no se anota: no queda nada por notar", () => {
+    const e = aplicar([
+      sobre({ tipo: "votacion", votacion }, "ana", 500),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m1" } }, "ana", 1000),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "beto", 5000),
+    ]);
+    expect(notarConsensoDeVoto(e, presentes("ana", "beto"), new Map(), 25_000).size).toBe(0);
   });
 });
 
