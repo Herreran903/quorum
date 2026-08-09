@@ -10,13 +10,25 @@
  */
 
 import { useAuth, useUser } from "@clerk/nextjs";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import { ANONIMO, PLANTILLA_JWT, hayAuth, type Identidad } from "./identidad";
 
 function useIdentidadClerk(): Identidad {
   const { isSignedIn, getToken } = useAuth();
   const { user } = useUser();
+
+  /**
+   * `getToken` y `user` cambian de identidad de objeto en cada emisión
+   * interna de Clerk (foco de ventana, renovación de sesión). Todo lo que
+   * dependa de ellos por referencia se rehace a cada rato — y la identidad
+   * es dependencia del efecto que conecta el transporte y arranca el agente:
+   * cada emisión derribaba la conexión y mataba al agente a mitad de turno,
+   * con el turno ya pedido descartándose en silencio. Por eso acá TODO se
+   * reduce a primitivos, y lo inestable vive en un ref.
+   */
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
 
   /**
    * El token para Portal, con la plantilla si existe.
@@ -32,24 +44,22 @@ function useIdentidadClerk(): Identidad {
    */
   const token = useCallback(async () => {
     try {
-      const conPlantilla = await getToken({ template: PLANTILLA_JWT });
+      const conPlantilla = await getTokenRef.current({ template: PLANTILLA_JWT });
       if (conPlantilla) return conPlantilla;
     } catch {
       // Sin plantilla todavía. No es un error que valga la pena gritar: es
       // el estado normal de una app recién creada.
     }
-    return getToken();
-  }, [getToken]);
+    return getTokenRef.current();
+  }, []);
+
+  const nombre = user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress;
+  const avatar = user?.imageUrl;
 
   return useMemo(() => {
     if (!isSignedIn) return ANONIMO;
-    return {
-      autenticado: true,
-      nombre: user?.fullName ?? user?.username ?? user?.primaryEmailAddress?.emailAddress,
-      avatar: user?.imageUrl,
-      token,
-    };
-  }, [isSignedIn, user, token]);
+    return { autenticado: true, nombre, avatar, token };
+  }, [isSignedIn, nombre, avatar, token]);
 }
 
 function useIdentidadAnonima(): Identidad {

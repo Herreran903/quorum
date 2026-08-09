@@ -12,12 +12,20 @@
  */
 
 import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
+import { usePathname } from "next/navigation";
 
 import { hayAuth } from "@/lib/identidad";
 
 function Boton({ ancho }: { ancho?: boolean }) {
+  /**
+   * Tras autenticarse hay que volver A ESTA sala, dicho explícito. Sin esto,
+   * los flujos que navegan (OAuth, registro de un usuario nuevo — o sea, el
+   * recién llegado con link compartido) caen al fallback global "/"… y la
+   * portada inventa una sala nueva vacía. "Entré y no vi nada", medido.
+   */
+  const ruta = usePathname();
   return (
-    <SignInButton mode="modal">
+    <SignInButton mode="modal" forceRedirectUrl={ruta} signUpForceRedirectUrl={ruta}>
       <button
         className={
           ancho

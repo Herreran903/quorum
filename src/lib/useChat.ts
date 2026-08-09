@@ -539,9 +539,14 @@ export function useChat(idSala: string): UseChat {
       agenteRef.current = null;
       creado?.desconectar();
       transporteRef.current = null;
+      // El agente murió con la conexión: si la UI siguiera creyendo que "yo
+      // conduzco", jamás ofrecería "Retomar" y la sala moriría en silencio.
+      setConduzco(false);
     };
     // Al cambiar la identidad hay que reconectar: el token viejo ya no es
     // quien sos, y una sesión con identidad rancia no puede quedar viva.
+    // (La identidad de Clerk ya llega reducida a primitivos — ver
+    // useIdentidad — así que esto solo dispara con cambios de verdad.)
   }, [idSala, identidad]);
 
   // ------------------------------------------------------------- acciones

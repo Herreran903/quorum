@@ -42,37 +42,41 @@ const emisor = emisorDeClerk();
 /**
  * Exigir sesión SOLO si hay con qué verificarla.
  *
- * Poner `anonymous: false` sin un bloque `auth` dejaría el canal cerrado para
- * todos, incluido quien sí inició sesión — Portal no tendría cómo validar el
- * token. Así la config sigue el mismo criterio que el resto de la app: sin
- * claves, todo corre en anónimo.
+ * Dos esquinas del esquema que ya nos mordieron (verificadas contra los .d.ts
+ * de @portalsdk/config, no contra la intuición):
+ *
+ *  - `auth` vive en la RAÍZ de la config, es por proyecto. Dentro de la
+ *    entrada del canal se compila igual (el spread esquiva el chequeo de
+ *    propiedades sobrantes) y el deploy no verifica nada.
+ *  - Las plantillas matchean por prefijo fijo. Los canales reales se llaman
+ *    `sala:{id}` (ver `canalDeSala`), así que la clave es `sala:*` — con
+ *    `sala-*` la regla no aplicaría a ningún canal existente.
  */
-const conAuth = emisor
-  ? {
-      anonymous: false,
-      auth: {
-        issuer: emisor,
-        jwksUrl: `${emisor}/.well-known/jwks.json`,
-        /**
-         * De dónde saca Portal la identidad dentro del token.
-         *
-         * `username` es lo que termina viéndose en la presencia, y por eso es
-         * el nombre que nadie puede falsificar desde el cliente. Requiere una
-         * plantilla JWT en Clerk llamada `portal` que incluya ese claim.
-         */
-        claimMap: { userId: "sub", username: "name" },
-      },
-    }
-  : { anonymous: true };
-
 export default defineConfig({
+  ...(emisor
+    ? {
+        auth: {
+          issuer: emisor,
+          jwksUrl: `${emisor}/.well-known/jwks.json`,
+          /**
+           * De dónde saca Portal la identidad dentro del token.
+           *
+           * `username` es lo que termina viéndose en la presencia, y por eso
+           * es el nombre que nadie puede falsificar desde el cliente. Requiere
+           * una plantilla JWT en Clerk llamada `portal` con ese claim.
+           */
+          claimMap: { userId: "sub", username: "name" },
+        },
+      }
+    : {}),
   channels: {
-    "sala-*": {
+    "sala:*": {
       mode: "standard",
       // Cualquiera con el enlace entra… pero, con auth configurada, teniendo
       // sesión iniciada. La sala es pública; la identidad no es opcional.
       access: "open",
-      ...conAuth,
+      // Sin emisor no hay cómo verificar tokens: todo corre en anónimo.
+      anonymous: !emisor,
     },
   },
 });
