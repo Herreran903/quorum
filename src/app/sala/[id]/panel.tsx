@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { useChat, type Perfil } from "@/lib/useChat";
+import { useChat } from "@/lib/useChat";
 import {
   BarraPresencia,
   Burbuja,
@@ -11,6 +11,7 @@ import {
   ModalVotacion,
   PanelArtefacto,
   Puntos,
+  Tecleando,
   useAutoScroll,
 } from "@/components/sala/piezas";
 import { ControlSesion, Puerta } from "@/components/sala/sesion";
@@ -25,7 +26,7 @@ export function Panel({ idSala }: { idSala: string }) {
 
 function Sala({ idSala }: { idSala: string }) {
   const s = useChat(idSala);
-  const scroll = useAutoScroll(s.items.length + (s.pensando ? 1 : 0));
+  const scroll = useAutoScroll(s.items.length + (s.pensando ? 1 : 0) + s.tecleando.length);
 
   // `bloqueado` es terminal: Portal rechazó la conexión y no va a reintentar.
   // Merece una pantalla propia — si no, la sala se queda en blanco sin decir
@@ -93,6 +94,7 @@ function Sala({ idSala }: { idSala: string }) {
                   />
                 ),
               )}
+              <Tecleando ids={s.tecleando} perfil={s.perfil} />
             </ul>
 
             {s.pensando && (
@@ -112,8 +114,6 @@ function Sala({ idSala }: { idSala: string }) {
           <Compositor
             onEnviar={s.enviar}
             onEscribiendo={s.avisarEscribiendo}
-            tecleando={s.tecleando}
-            perfil={s.perfil}
             puedeVotar={sePuedeVotar(s.instrucciones)}
             onVotar={() => escalar(s)}
           />
@@ -168,15 +168,11 @@ function escalar(s: ReturnType<typeof useChat>): void {
 function Compositor({
   onEnviar,
   onEscribiendo,
-  tecleando,
-  perfil,
   puedeVotar,
   onVotar,
 }: {
   onEnviar: (texto: string) => void;
   onEscribiendo: () => void;
-  tecleando: string[];
-  perfil: (id: string) => Perfil;
   puedeVotar: boolean;
   onVotar: () => void;
 }) {
@@ -221,15 +217,6 @@ function Compositor({
           Enviar
         </button>
       </div>
-
-      <p className="mt-1.5 h-4 text-[11px] text-tinta-baja">
-        {tecleando.length > 0 && (
-          <>
-            {tecleando.map((id) => perfil(id).nombre).join(", ")} {tecleando.length === 1 ? "está" : "están"}{" "}
-            escribiendo — el agente espera
-          </>
-        )}
-      </p>
     </div>
   );
 }

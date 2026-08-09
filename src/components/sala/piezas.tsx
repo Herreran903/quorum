@@ -120,6 +120,27 @@ export function BarraPresencia({
   );
 }
 
+/** Quién está tecleando, como un turno más del chat: avatar(es) + puntos. */
+export function Tecleando({
+  ids,
+  perfil,
+}: {
+  ids: string[];
+  perfil: (id: string) => Perfil;
+}) {
+  if (ids.length === 0) return null;
+  return (
+    <li className="sala-entra flex items-center gap-3 px-5 py-2 text-tinta-baja">
+      <div className="flex -space-x-1.5">
+        {ids.map((id) => (
+          <Avatar key={id} perfil={perfil(id)} tam={24} anillo />
+        ))}
+      </div>
+      <Puntos />
+    </li>
+  );
+}
+
 export function Puntos() {
   return (
     <span className="sala-puntos inline-flex gap-[3px]">

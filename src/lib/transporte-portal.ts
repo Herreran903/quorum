@@ -50,6 +50,19 @@ import type {
  */
 const VIGENCIA_TECLEO_MS = 6000;
 
+/**
+ * Cada cuánto se vuelve a evaluar la presencia contra el reloj.
+ *
+ * Portal no manda un frame de "dejé de escribir" — según
+ * `@portalsdk/wire-protocol`, el tecleo ajeno "expires by absence (~5s
+ * client-side); there is no explicit 'stopped' frame". Sin este barrido,
+ * `#emitirPresencia()` solo corre en reacción a eventos entrantes, y el
+ * ícono de "escribiendo" queda pegado al último estado visto hasta que por
+ * casualidad llegue otro evento cualquiera. Mismo rol que `#barrer()` en
+ * `transporte-mock.ts`.
+ */
+const BARRIDO_MS = 1000;
+
 function mapearEstado(s: ChannelStatus): EstadoConexion {
   switch (s) {
     case "idle":
@@ -84,6 +97,7 @@ export class TransportePortal implements Transporte {
 
   #escribiendoHasta = 0;
   #cerrado = false;
+  #barrido: ReturnType<typeof setInterval> | undefined;
 
   constructor(opciones: OpcionesTransporte, apiKey: string) {
     // Con `token`, Portal verifica el JWT contra el JWKS del proveedor y
@@ -111,7 +125,11 @@ export class TransportePortal implements Transporte {
       this.#canal.subscribe(() => this.#drenarStore()),
       this.#canal.on("presence", () => this.#emitirPresencia()),
       // `activity` es la señal de tecleo de Portal; recalcula la presencia.
-      this.#canal.on("activity", () => this.#emitirPresencia()),
+      this.#canal.on("activity", () => {
+        // TEMP: diagnóstico de por qué el tecleo ajeno no siempre reaparece.
+        console.log("[transporte-portal] activity", [...this.#canal.typing]);
+        this.#emitirPresencia();
+      }),
       this.#canal.on("status", (s, error) => {
         // Sin esto, una conexión rechazada (token que el servidor no puede
         // verificar, por ejemplo) se ve como una sala vacía sin explicación.
@@ -123,6 +141,8 @@ export class TransportePortal implements Transporte {
 
     // Primer momento de red del SDK. Antes de esto no hay conexión ni token.
     this.#canal.acquire();
+
+    this.#barrido = setInterval(() => this.#emitirPresencia(), BARRIDO_MS);
   }
 
   get yo(): string | undefined {
@@ -199,6 +219,7 @@ export class TransportePortal implements Transporte {
   desconectar(): void {
     if (this.#cerrado) return;
     this.#cerrado = true;
+    if (this.#barrido) clearInterval(this.#barrido);
     for (const soltar of this.#sueltas) soltar();
     this.#canal.release();
     this.#escuchasMsg.clear();
@@ -298,6 +319,12 @@ export class TransportePortal implements Transporte {
     if (this.#cerrado) return;
     const p = this.#presenciaActual();
     const firma = JSON.stringify(p);
+    // TEMP: diagnóstico de por qué el tecleo ajeno no siempre reaparece.
+    console.log(
+      "[transporte-portal] emitirPresencia",
+      firma === this.#ultimaFirma ? "deduped" : "emite",
+      p.espectadores.map((e) => `${e.id}:${e.escribiendo}`),
+    );
     if (firma === this.#ultimaFirma) return;
     this.#ultimaFirma = firma;
     for (const escucha of this.#escuchasPresencia) escucha(p);
