@@ -98,3 +98,9 @@ contexto nunca fue de la pestaña, fue del canal.
 ```bash
 npm test && npx tsc --noEmit && npm run lint && npm run build
 ```
+
+## Referencias
+
+- [Python + Agentes: creando agentes y flujos de IA](https://developer.microsoft.com/en-us/reactor/series/S-1633/) —
+  serie en español de Microsoft Reactor (feb–mar 2026) sobre construcción de
+  agentes: herramientas, memoria, evaluación y orquestación.
