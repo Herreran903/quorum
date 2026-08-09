@@ -22,9 +22,12 @@
  */
 
 import {
+  construirPromptConflicto,
   construirPromptTurno,
   extraerJson,
+  sanearConflicto,
   sanearTurno,
+  type Conflicto,
   type ContextoTurno,
   type ModeloTurno,
   type Turno,
@@ -57,6 +60,11 @@ export class ModeloAbierto implements ModeloTurno {
       throw new Error(`${this.nombre} devolvió un turno inservible: ${crudo.slice(0, 200)}`);
     }
     return turno;
+  }
+
+  /** ¿Estos dos pedidos se contradicen? Es lo que abre una votación. */
+  async hayConflicto(a: string, b: string): Promise<Conflicto> {
+    return sanearConflicto(extraerJson(await this.#pedir(construirPromptConflicto(a, b), 1500)));
   }
 
   async #pedir(prompt: string, maxTokens: number): Promise<string> {

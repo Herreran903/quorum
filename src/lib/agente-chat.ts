@@ -41,6 +41,14 @@ export interface VistaAgente {
   /** lo que la sala ya resolvió votando */
   decisiones: string[];
   artefacto: Artefacto | undefined;
+  /**
+   * La cola de pedidos sin atender, del más viejo al más nuevo, con su autor.
+   *
+   * El primero es el que el agente está por aplicar; los demás esperan. Es lo
+   * que permite ver, ANTES de aplicar nada, si el que sigue contradice al que
+   * viene — el momento exacto en que la sala debe votar.
+   */
+  enEspera: PedidoEnEspera[];
   /** la votación en curso, si la hay */
   votacionAbierta: Votacion | undefined;
   /** conteo por opción de la votación abierta */
@@ -55,6 +63,16 @@ export interface VistaAgente {
    * es de uno solo, y el canal es quien lo dice.
    */
   debeCeder: boolean;
+}
+
+/** Un pedido humano que todavía ningún turno incorporó. */
+export interface PedidoEnEspera {
+  id: string;
+  /** quién lo publicó, en ids del canal: dos pedidos del mismo no se votan */
+  emisor: string;
+  /** el nombre que ve la sala */
+  autor: string;
+  texto: string;
 }
 
 interface RespuestaTurno {
@@ -78,6 +96,10 @@ export class AgenteChat {
   #reloj: ReturnType<typeof setInterval> | undefined;
   #ocupado = false;
   #corriendo = false;
+  /** corta la llamada en vuelo cuando el agente para */
+  #abortar: AbortController | undefined;
+  /** pares ya consultados al detector de conflictos; no se repregunta */
+  readonly #paresRevisados = new Set<string>();
 
   constructor(transporte: Transporte, ver: () => VistaAgente, eventos: EventosAgenteChat = {}) {
     this.#transporte = transporte;
@@ -100,6 +122,10 @@ export class AgenteChat {
     this.#corriendo = false;
     if (this.#reloj) clearInterval(this.#reloj);
     this.#reloj = undefined;
+    // Sin esto, un turno pedido hace un segundo sigue viajando y se publica
+    // después de haber parado: el agente "muerto" hablando.
+    this.#abortar?.abort();
+    this.#abortar = undefined;
   }
 
   // ------------------------------------------------------------------ interno
@@ -132,6 +158,12 @@ export class AgenteChat {
       // regla que evita que le hable encima a quien está escribiendo.
       if (v.escribiendo) return;
 
+      // Antes de aplicar nada: si lo que sigue en la cola contradice a lo que
+      // viene, que decida la sala. Aplicar los dos en fila haría que el
+      // segundo pisara al primero sin que nadie lo hubiera elegido.
+      await this.#quizasAbrirVotacion(v);
+      if (!this.#corriendo || this.#ver().votacionAbierta) return;
+
       await this.#turno(v);
     } finally {
       this.#ocupado = false;
@@ -140,10 +172,12 @@ export class AgenteChat {
 
   async #turno(v: VistaAgente): Promise<void> {
     this.#eventos.onPensando?.(true);
+    this.#abortar = new AbortController();
     try {
       const res = await fetch("/api/turno", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: this.#abortar.signal,
         body: JSON.stringify({
           tarea: v.tarea,
           conversacion: v.conversacion,
@@ -170,6 +204,18 @@ export class AgenteChat {
       this.#eventos.onFuente?.(datos.fuente, datos.degradado);
       if (!this.#corriendo) return;
 
+      /**
+       * El mundo pudo cambiar mientras el modelo pensaba —son segundos, y en
+       * ese hueco alguien puede retirar su pedido o abrirse una votación—. La
+       * vista `v` es una foto vieja: lo que se publica se decide contra la de
+       * AHORA. Sin esto, retirar un pedido mientras el agente lo trabajaba no
+       * lo detenía: volvía igual, lo publicaba y lo daba por aplicado.
+       */
+      const ahora = this.#ver();
+      if (ahora.votacionAbierta) return;
+      const seguianVivos = turno.atendio.filter((id) => ahora.pendientes.includes(id));
+      if (v.pendientes.length > 0 && seguianVivos.length === 0) return;
+
       await this.#transporte.publicar({
         tipo: "mensaje",
         mensaje: {
@@ -177,13 +223,14 @@ export class AgenteChat {
           texto: turno.mensaje,
           deAgente: true,
           actividad: turno.actividad,
-          // Solo ids que existan: el modelo a veces inventa.
-          atendio: turno.atendio.filter((id) => v.pendientes.includes(id)),
+          // Solo ids que sigan pendientes: el modelo a veces inventa, y lo
+          // retirado ya no se puede dar por atendido.
+          atendio: seguianVivos,
         },
       });
 
       if (turno.artefacto) {
-        await this.#publicarArtefacto(turno.artefacto, (v.artefacto?.version ?? 0) + 1);
+        await this.#publicarArtefacto(turno.artefacto, (ahora.artefacto?.version ?? 0) + 1);
       }
 
       if (turno.fin) {
@@ -191,10 +238,71 @@ export class AgenteChat {
         this.#eventos.onFin?.();
       }
     } catch (e) {
-      console.error("[agente-chat] el turno falló", e);
+      // Abortar es una decisión nuestra, no una falla: no se grita.
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        console.error("[agente-chat] el turno falló", e);
+      }
     } finally {
+      this.#abortar = undefined;
       this.#eventos.onPensando?.(false);
     }
+  }
+
+  /**
+   * ¿El pedido que viene y el que sigue se contradicen? Si sí, la sala vota.
+   *
+   * Se compara el primero de la cola contra el primero de OTRA persona: dos
+   * pedidos de la misma no son un desacuerdo del equipo, son alguien que se
+   * corrigió a sí mismo, y ahí manda el último.
+   */
+  async #quizasAbrirVotacion(v: VistaAgente): Promise<void> {
+    const [a] = v.enEspera;
+    if (!a) return;
+    const b = v.enEspera.find((p) => p.emisor !== a.emisor);
+    if (!b) return;
+
+    const clave = `${a.id}|${b.id}`;
+    if (this.#paresRevisados.has(clave)) return;
+    this.#paresRevisados.add(clave);
+
+    try {
+      const res = await fetch("/api/turno", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conflicto: { a: a.texto, b: b.texto } }),
+      });
+      if (!res.ok) return;
+      const { conflicto, motivo } = (await res.json()) as { conflicto: boolean; motivo: string };
+      if (!conflicto || !this.#corriendo) return;
+
+      // Los dos pudieron retirarse mientras se consultaba.
+      const ahora = this.#ver();
+      const vivos = new Set(ahora.enEspera.map((p) => p.id));
+      if (!vivos.has(a.id) || !vivos.has(b.id) || ahora.votacionAbierta) return;
+
+      await this.abrirVotacion(motivo, [
+        { id: a.id, texto: a.texto, propuestaPor: a.emisor },
+        { id: b.id, texto: b.texto, propuestaPor: b.emisor },
+      ]);
+    } catch (e) {
+      console.error("[agente-chat] no pude revisar el conflicto", e);
+    }
+  }
+
+  /** Abre una votación. La usa el detector de conflictos y también la gente, a mano. */
+  async abrirVotacion(
+    motivo: string,
+    opciones: { id: string; texto: string; propuestaPor?: string }[],
+  ): Promise<void> {
+    await this.#transporte.publicar({
+      tipo: "votacion",
+      votacion: {
+        id: nuevoId(),
+        motivo,
+        opciones,
+        cierraEn: Date.now() + VENTANA_VOTACION_MS,
+      },
+    });
   }
 
   /** El artefacto va partido: Portal rechaza `content` por encima de 2KB. */

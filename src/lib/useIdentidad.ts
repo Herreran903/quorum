@@ -10,7 +10,7 @@
  */
 
 import { useAuth, useUser } from "@clerk/nextjs";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { ANONIMO, PLANTILLA_JWT, hayAuth, type Identidad } from "./identidad";
 
@@ -28,7 +28,12 @@ function useIdentidadClerk(): Identidad {
    * reduce a primitivos, y lo inestable vive en un ref.
    */
   const getTokenRef = useRef(getToken);
-  getTokenRef.current = getToken;
+  // En un efecto y no en el render: escribir un ref mientras se renderiza es
+  // un pecado de React de verdad (rompe el render concurrente), y acá no hace
+  // falta — el token se pide después de montar, nunca durante el render.
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
 
   /**
    * El token para Portal, con la plantilla si existe.

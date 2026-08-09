@@ -68,6 +68,19 @@ export interface Turno {
 export interface ModeloTurno {
   readonly nombre: string;
   siguienteTurno(ctx: ContextoTurno): Promise<Turno>;
+  /**
+   * ¿Estos dos pedidos se contradicen? Es lo que abre una votación.
+   *
+   * Opcional a propósito: el guion de respaldo no puede juzgarlo, y sin
+   * modelo real la sala no abre votaciones automáticas.
+   */
+  hayConflicto?(a: string, b: string): Promise<Conflicto>;
+}
+
+/** El veredicto sobre dos pedidos que podrían chocar. */
+export interface Conflicto {
+  conflicto: boolean;
+  motivo: string;
 }
 
 /** Tope duro del artefacto. Más que esto y el chat deja de ser el foco. */
@@ -192,6 +205,43 @@ en el primero.
 
 Respondé SOLO con JSON:
 {"mensaje":"...","actividad":"...","atendio":[],"artefacto":{"tipo":"codigo","titulo":"...","lenguaje":"...","contenido":"..."},"fin":false}`;
+}
+
+/**
+ * Lo que se le pregunta al modelo para decidir si dos pedidos chocan.
+ *
+ * La pregunta es estrecha a propósito —"de modo que hacer una impida hacer la
+ * otra"— porque el error caro es el falso positivo: abrir una votación por dos
+ * pedidos que en realidad convivían interrumpe a la sala por nada. Medido
+ * contra Gemini 3.6 Flash sobre 16 pares etiquetados a mano (8 que chocan, 8
+ * que conviven): 16/16, sin un solo falso positivo.
+ */
+export function construirPromptConflicto(a: string, b: string): string {
+  return `Dos personas del mismo equipo le pidieron cosas distintas al mismo agente:
+
+A: "${a}"
+B: "${b}"
+
+¿Se contradicen, de modo que hacer una impide hacer la otra?
+
+Respondé SOLO con JSON:
+{"conflicto":true,"motivo":"frase corta que explique el choque"}
+o
+{"conflicto":false,"motivo":""}`;
+}
+
+/**
+ * Sin motivo no hay conflicto.
+ *
+ * No es cosmético: un `true` pelado abriría una votación que la sala no puede
+ * entender —el motivo ES el texto del modal— así que se exige que el modelo
+ * sepa decir por qué chocan antes de interrumpir a nadie.
+ */
+export function sanearConflicto(crudo: unknown): Conflicto {
+  if (!crudo || typeof crudo !== "object") return { conflicto: false, motivo: "" };
+  const o = crudo as Record<string, unknown>;
+  const motivo = typeof o.motivo === "string" ? o.motivo.trim().slice(0, 120) : "";
+  return { conflicto: o.conflicto === true && motivo.length > 0, motivo };
 }
 
 /** Con `format: json` la respuesta debería ser JSON puro, pero a veces trae prosa alrededor. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_ARTEFACTO, extraerJson, sanearTurno } from "./modelo-turno";
+import { MAX_ARTEFACTO, extraerJson, sanearConflicto, sanearTurno } from "./modelo-turno";
 import { contenidoDe, limpiarRazonamiento } from "./modelo-abierto";
 import { ModeloGuionTurno } from "./modelo-guion-turno";
 import { ganadoraDe, presupuestoDeTexto, trocear } from "./agente-chat";
@@ -65,6 +65,30 @@ describe("sanearTurno", () => {
     expect(sanearTurno({ mensaje: "x", fin: true })?.fin).toBe(true);
     expect(sanearTurno({ mensaje: "x", fin: "true" })?.fin).toBe(false);
     expect(sanearTurno({ mensaje: "x" })?.fin).toBe(false);
+  });
+});
+
+describe("sanearConflicto", () => {
+  /**
+   * El error caro es el falso positivo: una votación abierta por nada
+   * interrumpe a toda la sala. Ante cualquier duda, no hay conflicto.
+   */
+  it("no hay conflicto sin un motivo que lo explique", () => {
+    expect(sanearConflicto({ conflicto: true, motivo: "" }).conflicto).toBe(false);
+    expect(sanearConflicto({ conflicto: true }).conflicto).toBe(false);
+  });
+
+  it("reconoce un conflicto declarado con motivo", () => {
+    expect(sanearConflicto({ conflicto: true, motivo: "uno pide A y el otro B" })).toEqual({
+      conflicto: true,
+      motivo: "uno pide A y el otro B",
+    });
+  });
+
+  it("tolera basura", () => {
+    expect(sanearConflicto(null).conflicto).toBe(false);
+    expect(sanearConflicto("nope").conflicto).toBe(false);
+    expect(sanearConflicto({ conflicto: "true", motivo: "x" }).conflicto).toBe(false);
   });
 });
 

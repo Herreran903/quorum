@@ -367,6 +367,11 @@ function derivarVista(
     tarea: estado.tarea ?? "",
     conversacion,
     pendientes: activo ? [activo.id] : [],
+    // La cola completa, con autor: es lo que deja ver si el que sigue
+    // contradice al que se está por aplicar. Ver `#quizasAbrirVotacion`.
+    enEspera: instrucciones
+      .filter((i) => !i.aplicada)
+      .map((i) => ({ id: i.id, emisor: i.emisor, autor: perfil(i.emisor).nombre, texto: i.texto })),
     decisiones: derivarResueltas(estado, ahora).map(textoDecision),
     artefacto: armarArtefacto(estado.trozos),
     votacionAbierta,

@@ -37,7 +37,7 @@ function elegirModelo(): ModeloTurno {
 }
 
 export async function POST(req: Request) {
-  let cuerpo: Partial<ContextoTurno>;
+  let cuerpo: Partial<ContextoTurno> & { conflicto?: { a: string; b: string } };
   try {
     cuerpo = await req.json();
   } catch {
@@ -45,6 +45,23 @@ export async function POST(req: Request) {
   }
 
   const modelo = elegirModelo();
+
+  // Modo consulta: ¿estos dos pedidos chocan? Solo un modelo real sabe
+  // juzgarlo; con el guion no se abre ninguna votación automática y la sala
+  // decide a mano. Ante la duda se responde "no chocan": interrumpir a todos
+  // por un falso positivo es peor que dejar pasar un choque.
+  if (cuerpo.conflicto) {
+    const { a, b } = cuerpo.conflicto;
+    if (typeof a !== "string" || typeof b !== "string" || !modelo.hayConflicto) {
+      return NextResponse.json({ conflicto: false, motivo: "" });
+    }
+    try {
+      return NextResponse.json(await modelo.hayConflicto(a, b));
+    } catch (e) {
+      console.error("[api/turno] el detector de conflictos falló", e);
+      return NextResponse.json({ conflicto: false, motivo: "" });
+    }
+  }
 
   const ctx: ContextoTurno = {
     tarea: cuerpo.tarea ?? "",
