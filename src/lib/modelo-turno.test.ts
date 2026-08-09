@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MAX_ARTEFACTO, extraerJson, sanearConflicto, sanearTurno } from "./modelo-turno";
+import { contenidoDe, limpiarRazonamiento } from "./modelo-abierto";
 import { ModeloGuionTurno } from "./modelo-guion-turno";
 import { ganadoraDe, presupuestoDeTexto, trocear } from "./agente-chat";
 import { TOPE_CONTENIDO_BYTES, type Cuerpo, type Votacion } from "./protocolo";
@@ -97,6 +98,29 @@ describe("extraerJson", () => {
 
   it("devuelve undefined si no hay objeto", () => {
     expect(extraerJson("sin json")).toBeUndefined();
+  });
+});
+
+describe("ModeloAbierto — leer al proveedor", () => {
+  it("saca el texto de la primera opción", () => {
+    expect(contenidoDe({ choices: [{ message: { content: "hola" } }] })).toBe("hola");
+  });
+
+  it("rechaza respuestas vacías o malformadas", () => {
+    expect(contenidoDe({ choices: [{ message: { content: "   " } }] })).toBeUndefined();
+    expect(contenidoDe({ choices: [] })).toBeUndefined();
+    expect(contenidoDe(null)).toBeUndefined();
+    expect(contenidoDe("basura")).toBeUndefined();
+  });
+
+  /**
+   * Un razonador que piensa en voz alta con llaves adentro engañaría a
+   * `extraerJson`: agarraría el objeto del pensamiento, no el del turno.
+   */
+  it("bota el razonamiento antes de buscar el JSON", () => {
+    const crudo = '<think>quizá {"mensaje":"borrador"}…</think>\n{"mensaje":"final"}';
+    expect(extraerJson(limpiarRazonamiento(crudo))).toEqual({ mensaje: "final" });
+    expect(limpiarRazonamiento("sin pensamiento")).toBe("sin pensamiento");
   });
 });
 

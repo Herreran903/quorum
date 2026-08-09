@@ -15,6 +15,7 @@ import type { ContextoTurno, ModeloTurno, Turno } from "@/lib/modelo-turno";
 import { VENTANA_CONVERSACION } from "@/lib/modelo-turno";
 import { ModeloGuionTurno } from "@/lib/modelo-guion-turno";
 import { ModeloClaude } from "@/lib/modelo-claude";
+import { ModeloAbierto } from "@/lib/modelo-abierto";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -26,7 +27,12 @@ function elegirModelo(): ModeloTurno {
   try {
     return new ModeloClaude();
   } catch {
-    // Sin ANTHROPIC_API_KEY: degradar al guion en vez de romper.
+    // Sin ANTHROPIC_API_KEY: probar el proveedor abierto antes de rendirse.
+  }
+  try {
+    return new ModeloAbierto();
+  } catch {
+    // Sin proveedor configurado: el guion mantiene viva la sala.
     return respaldo;
   }
 }
@@ -41,11 +47,12 @@ export async function POST(req: Request) {
 
   const modelo = elegirModelo();
 
-  // Modo consulta: ¿estos dos pedidos chocan? Solo Claude sabe responderlo;
-  // sin él no se abre ninguna votación automática y la sala la escala a mano.
+  // Modo consulta: ¿estos dos pedidos chocan? Solo un modelo real sabe
+  // responderlo; con el guion no se abre ninguna votación automática y la
+  // sala la escala a mano.
   if (cuerpo.conflicto) {
     const { a, b } = cuerpo.conflicto;
-    if (!(modelo instanceof ModeloClaude)) {
+    if (!(modelo instanceof ModeloClaude || modelo instanceof ModeloAbierto)) {
       return NextResponse.json({ conflicto: false, motivo: "" });
     }
     try {
