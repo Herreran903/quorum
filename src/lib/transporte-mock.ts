@@ -24,7 +24,7 @@ const LATIDO_MS = 1000;
 /** sin latido en este tiempo, la pestaña se da por ida */
 const EXPIRA_MS = 3200;
 /** cuánto dura la señal de "escribiendo" antes de apagarse sola */
-const ESCRIBIENDO_MS = 2500;
+const ESCRIBIENDO_MS = 1800;
 /** throttle de `escribiendo()` para no inundar el canal */
 const THROTTLE_ESCRIBIENDO_MS = 400;
 /** tope de historia guardada, para no llenar localStorage */

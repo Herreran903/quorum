@@ -10,6 +10,10 @@
  *   - hay una votación abierta  → no avanza; si venció, la resuelve
  *   - alguien está escribiendo  → se calla y espera
  *   - si no                     → pide un turno y lo publica
+ *
+ * Los pedidos se atienden de a uno: `pendientes` (ver `useChat.ts`) solo trae
+ * el más viejo sin atender. Los demás quedan pausados —visibles en el
+ * consolidado, cancelables— hasta que le toque el turno a cada uno.
  */
 
 import {
@@ -27,9 +31,6 @@ export const RITMO_MS = 2500;
 
 /** Cuánto dura una votación abierta. */
 export const VENTANA_VOTACION_MS = 20_000;
-
-/** Dos pedidos separados por más de esto ya no se leen como un choque. */
-const VENTANA_CONFLICTO_MS = 90_000;
 
 /** Lo que el agente necesita saber, leído del estado del hook. */
 export interface VistaAgente {
@@ -54,16 +55,6 @@ export interface VistaAgente {
    * es de uno solo, y el canal es quien lo dice.
    */
   debeCeder: boolean;
-  /** las dos últimas instrucciones humanas de personas distintas */
-  ultimoPar: { a: MensajeCorto; b: MensajeCorto } | undefined;
-}
-
-export interface MensajeCorto {
-  id: string;
-  autor: string;
-  emisor: string;
-  texto: string;
-  at: number;
 }
 
 interface RespuestaTurno {
@@ -87,8 +78,6 @@ export class AgenteChat {
   #reloj: ReturnType<typeof setInterval> | undefined;
   #ocupado = false;
   #corriendo = false;
-  /** pares ya consultados al detector de conflictos; no se repregunta */
-  readonly #paresRevisados = new Set<string>();
 
   constructor(transporte: Transporte, ver: () => VistaAgente, eventos: EventosAgenteChat = {}) {
     this.#transporte = transporte;
@@ -142,9 +131,6 @@ export class AgenteChat {
       // Alguien teclea: el agente se calla. No es una pausa técnica — es la
       // regla que evita que le hable encima a quien está escribiendo.
       if (v.escribiendo) return;
-
-      await this.#quizasAbrirVotacion(v);
-      if (!this.#corriendo || this.#ver().votacionAbierta) return;
 
       await this.#turno(v);
     } finally {
@@ -223,51 +209,6 @@ export class AgenteChat {
         trozo: { ...cabecera, parte: i, total: partes.length, texto: partes[i] },
       });
     }
-  }
-
-  /** ¿Los dos últimos pedidos se contradicen? Si sí, la sala lo resuelve votando. */
-  async #quizasAbrirVotacion(v: VistaAgente): Promise<void> {
-    const par = v.ultimoPar;
-    if (!par) return;
-    if (Math.abs(par.a.at - par.b.at) > VENTANA_CONFLICTO_MS) return;
-
-    const clave = `${par.a.id}|${par.b.id}`;
-    if (this.#paresRevisados.has(clave)) return;
-    this.#paresRevisados.add(clave);
-
-    try {
-      const res = await fetch("/api/turno", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ conflicto: { a: par.a.texto, b: par.b.texto } }),
-      });
-      if (!res.ok) return;
-      const { conflicto, motivo } = (await res.json()) as { conflicto: boolean; motivo: string };
-      if (!conflicto || !this.#corriendo) return;
-
-      await this.abrirVotacion(motivo, [
-        { id: par.a.id, texto: par.a.texto, propuestaPor: par.a.emisor },
-        { id: par.b.id, texto: par.b.texto, propuestaPor: par.b.emisor },
-      ]);
-    } catch (e) {
-      console.error("[agente-chat] no pude revisar el conflicto", e);
-    }
-  }
-
-  /** Abre una votación. La usa el detector de conflictos y también la gente, a mano. */
-  async abrirVotacion(
-    motivo: string,
-    opciones: { id: string; texto: string; propuestaPor?: string }[],
-  ): Promise<void> {
-    await this.#transporte.publicar({
-      tipo: "votacion",
-      votacion: {
-        id: nuevoId(),
-        motivo,
-        opciones,
-        cierraEn: Date.now() + VENTANA_VOTACION_MS,
-      },
-    });
   }
 
 }

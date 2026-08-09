@@ -125,11 +125,7 @@ export class TransportePortal implements Transporte {
       this.#canal.subscribe(() => this.#drenarStore()),
       this.#canal.on("presence", () => this.#emitirPresencia()),
       // `activity` es la señal de tecleo de Portal; recalcula la presencia.
-      this.#canal.on("activity", () => {
-        // TEMP: diagnóstico de por qué el tecleo ajeno no siempre reaparece.
-        console.log("[transporte-portal] activity", [...this.#canal.typing]);
-        this.#emitirPresencia();
-      }),
+      this.#canal.on("activity", () => this.#emitirPresencia()),
       this.#canal.on("status", (s, error) => {
         // Sin esto, una conexión rechazada (token que el servidor no puede
         // verificar, por ejemplo) se ve como una sala vacía sin explicación.
@@ -319,12 +315,6 @@ export class TransportePortal implements Transporte {
     if (this.#cerrado) return;
     const p = this.#presenciaActual();
     const firma = JSON.stringify(p);
-    // TEMP: diagnóstico de por qué el tecleo ajeno no siempre reaparece.
-    console.log(
-      "[transporte-portal] emitirPresencia",
-      firma === this.#ultimaFirma ? "deduped" : "emite",
-      p.espectadores.map((e) => `${e.id}:${e.escribiendo}`),
-    );
     if (firma === this.#ultimaFirma) return;
     this.#ultimaFirma = firma;
     for (const escucha of this.#escuchasPresencia) escucha(p);

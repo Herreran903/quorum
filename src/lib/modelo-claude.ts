@@ -24,12 +24,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import {
-  construirPromptConflicto,
   construirPromptTurno,
   extraerJson,
-  sanearConflicto,
   sanearTurno,
-  type Conflicto,
   type ContextoTurno,
   type ModeloTurno,
   type Turno,
@@ -55,12 +52,6 @@ export class ModeloClaude implements ModeloTurno {
     const turno = sanearTurno(extraerJson(crudo));
     if (!turno) throw new Error(`Claude devolvió un turno inservible: ${crudo.slice(0, 200)}`);
     return turno;
-  }
-
-  /** ¿Estos dos pedidos se contradicen? Es lo que abre una votación. */
-  async hayConflicto(a: string, b: string): Promise<Conflicto> {
-    const crudo = await this.#pedir(construirPromptConflicto(a, b), 1500);
-    return sanearConflicto(extraerJson(crudo));
   }
 
   async #pedir(prompt: string, maxTokens: number): Promise<string> {

@@ -5,6 +5,8 @@ import {
   VENTANA_CONDUCCION_MS,
   armarArtefacto,
   derivarConductor,
+  derivarInstrucciones,
+  pendienteActivo,
   reducir,
   type EstadoChat,
 } from "./useChat";
@@ -80,6 +82,96 @@ describe("reducir — votos", () => {
       sobre({ tipo: "voto", voto: { votacionId: "v2", opcionId: "a" } }, "ana"),
     ]);
     expect(e.votos).toHaveLength(2);
+  });
+});
+
+describe("reducir — retiro", () => {
+  it("el autor retira su propio pedido pendiente", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "hola" } }, "ana"),
+      sobre({ tipo: "retiro", retiro: { instruccionId: "m1" } }, "ana"),
+    ]);
+    expect(e.retiros.has("m1")).toBe(true);
+  });
+
+  it("ignora el retiro de un pedido ajeno", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "hola" } }, "ana"),
+      sobre({ tipo: "retiro", retiro: { instruccionId: "m1" } }, "beto"),
+    ]);
+    expect(e.retiros.has("m1")).toBe(false);
+  });
+
+  it("ignora el retiro de un pedido ya aplicado por el agente", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "hola" } }, "ana"),
+      sobre(
+        { tipo: "mensaje", mensaje: { id: "m2", texto: "listo", deAgente: true, atendio: ["m1"] } },
+        "agente",
+      ),
+      sobre({ tipo: "retiro", retiro: { instruccionId: "m1" } }, "ana"),
+    ]);
+    expect(e.retiros.has("m1")).toBe(false);
+  });
+
+  it("ignora el retiro de un id que no existe", () => {
+    const e = aplicar([sobre({ tipo: "retiro", retiro: { instruccionId: "fantasma" } }, "ana")]);
+    expect(e.retiros.has("fantasma")).toBe(false);
+  });
+
+  it("es idempotente", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "hola" } }, "ana"),
+      sobre({ tipo: "retiro", retiro: { instruccionId: "m1" } }, "ana"),
+      sobre({ tipo: "retiro", retiro: { instruccionId: "m1" } }, "ana"),
+    ]);
+    expect(e.retiros.size).toBe(1);
+  });
+});
+
+describe("pendienteActivo", () => {
+  function activoDe(estado: EstadoChat) {
+    return pendienteActivo(derivarInstrucciones(estado));
+  }
+
+  it("sin pedidos no hay nada activo", () => {
+    expect(activoDe(VACIO)).toBeUndefined();
+  });
+
+  it("con uno solo, ese es el activo", () => {
+    const e = aplicar([sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "en prosa" } }, "ana", 1000)]);
+    expect(activoDe(e)?.id).toBe("m1");
+  });
+
+  it("con dos, gana el que llegó primero — no importa quién lo mandó", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "en prosa" } }, "ana", 3000),
+      sobre({ tipo: "mensaje", mensaje: { id: "m2", texto: "en verso" } }, "beto", 1000),
+    ]);
+    // m2 llegó primero (at: 1000) aunque se publicó después en el array.
+    expect(activoDe(e)?.id).toBe("m2");
+  });
+
+  it("un pedido ya aplicado no cuenta: pasa al siguiente en la cola", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "en prosa" } }, "ana", 1000),
+      sobre({ tipo: "mensaje", mensaje: { id: "m2", texto: "en verso" } }, "beto", 2000),
+      sobre(
+        { tipo: "mensaje", mensaje: { id: "m3", texto: "listo", deAgente: true, atendio: ["m1"] } },
+        "agente",
+        2500,
+      ),
+    ]);
+    expect(activoDe(e)?.id).toBe("m2");
+  });
+
+  it("un pedido retirado no cuenta", () => {
+    const e = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "en prosa" } }, "ana", 1000),
+      sobre({ tipo: "mensaje", mensaje: { id: "m2", texto: "en verso" } }, "beto", 2000),
+      sobre({ tipo: "retiro", retiro: { instruccionId: "m1" } }, "ana", 1500),
+    ]);
+    expect(activoDe(e)?.id).toBe("m2");
   });
 });
 

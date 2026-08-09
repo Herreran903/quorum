@@ -1,6 +1,5 @@
 /**
- * El agente pide aquí su próximo turno de chat, y aquí se consulta si dos
- * pedidos se contradicen.
+ * El agente pide aquí su próximo turno de chat.
  *
  * Vive en el servidor porque la llave del proveedor no puede pisar el bundle
  * del navegador.
@@ -38,7 +37,7 @@ function elegirModelo(): ModeloTurno {
 }
 
 export async function POST(req: Request) {
-  let cuerpo: Partial<ContextoTurno> & { conflicto?: { a: string; b: string } };
+  let cuerpo: Partial<ContextoTurno>;
   try {
     cuerpo = await req.json();
   } catch {
@@ -46,21 +45,6 @@ export async function POST(req: Request) {
   }
 
   const modelo = elegirModelo();
-
-  // Modo consulta: ¿estos dos pedidos chocan? Solo un modelo real sabe
-  // responderlo; con el guion no se abre ninguna votación automática y la
-  // sala la escala a mano.
-  if (cuerpo.conflicto) {
-    const { a, b } = cuerpo.conflicto;
-    if (!(modelo instanceof ModeloClaude || modelo instanceof ModeloAbierto)) {
-      return NextResponse.json({ conflicto: false, motivo: "" });
-    }
-    try {
-      return NextResponse.json(await modelo.hayConflicto(a, b));
-    } catch {
-      return NextResponse.json({ conflicto: false, motivo: "" });
-    }
-  }
 
   const ctx: ContextoTurno = {
     tarea: cuerpo.tarea ?? "",

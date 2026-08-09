@@ -126,13 +126,25 @@ export interface Voto {
   opcionId: string;
 }
 
+/**
+ * Retira una petición propia: deja de contar como pendiente, desaparece del
+ * consolidado y, si estaba a votación, esa opción deja de ser elegible.
+ *
+ * Quién puede retirar cuál se valida al reducir (`emisor` == autor original),
+ * no acá — este cuerpo solo declara la intención.
+ */
+export interface Retiro {
+  instruccionId: string;
+}
+
 /** Todo lo que viaja por el canal. */
 export type Cuerpo =
   | { tipo: "tarea"; tarea: Tarea }
   | { tipo: "mensaje"; mensaje: Mensaje }
   | { tipo: "artefacto"; trozo: TrozoArtefacto }
   | { tipo: "votacion"; votacion: Votacion }
-  | { tipo: "voto"; voto: Voto };
+  | { tipo: "voto"; voto: Voto }
+  | { tipo: "retiro"; retiro: Retiro };
 
 export type TipoMensaje = Cuerpo["tipo"];
 
@@ -142,6 +154,7 @@ export const TIPOS = [
   "artefacto",
   "votacion",
   "voto",
+  "retiro",
 ] as const satisfies readonly Cuerpo["tipo"][];
 
 /** Lo que entrega el transporte al suscriptor: cuerpo + quién y cuándo. */

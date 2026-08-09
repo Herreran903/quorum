@@ -33,7 +33,6 @@ function vista(p: Partial<VistaAgente> = {}): VistaAgente {
     conteo: {},
     escribiendo: false,
     debeCeder: false,
-    ultimoPar: undefined,
     ...p,
   };
 }

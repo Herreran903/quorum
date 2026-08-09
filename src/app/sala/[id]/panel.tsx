@@ -111,17 +111,17 @@ function Sala({ idSala }: { idSala: string }) {
             )}
           </div>
 
-          <Compositor
-            onEnviar={s.enviar}
-            onEscribiendo={s.avisarEscribiendo}
-            puedeVotar={sePuedeVotar(s.instrucciones)}
-            onVotar={() => escalar(s)}
-          />
+          <Compositor onEnviar={s.enviar} onEscribiendo={s.avisarEscribiendo} />
         </section>
 
         {/* -------------------------------- consolidado + lo que construye */}
         <aside className="flex min-h-0 flex-col border-t border-linea bg-panel lg:border-t-0">
-          <Consolidado instrucciones={s.instrucciones} perfil={s.perfil} />
+          <Consolidado
+            instrucciones={s.instrucciones}
+            perfil={s.perfil}
+            yo={s.yo}
+            onEliminar={s.retirarPeticion}
+          />
           <PanelArtefacto artefacto={s.artefacto} />
         </aside>
       </div>
@@ -146,35 +146,12 @@ function Sala({ idSala }: { idSala: string }) {
   );
 }
 
-/** Hacen falta dos pedidos de personas distintas para que haya algo que dirimir. */
-function sePuedeVotar(instrucciones: { emisor: string }[]): boolean {
-  return new Set(instrucciones.map((i) => i.emisor)).size >= 2;
-}
-
-/** Pone a votación los dos últimos pedidos de personas distintas. */
-function escalar(s: ReturnType<typeof useChat>): void {
-  const ultimo = s.instrucciones.at(-1);
-  if (!ultimo) return;
-  const otro = [...s.instrucciones].reverse().find((i) => i.emisor !== ultimo.emisor);
-  if (!otro) return;
-  const a = s.perfil(otro.emisor).nombre;
-  const b = s.perfil(ultimo.emisor).nombre;
-  s.ponerAVotacion(`${a} y ${b} pidieron cosas distintas`, [
-    { id: otro.id, texto: otro.texto, propuestaPor: otro.emisor },
-    { id: ultimo.id, texto: ultimo.texto, propuestaPor: ultimo.emisor },
-  ]);
-}
-
 function Compositor({
   onEnviar,
   onEscribiendo,
-  puedeVotar,
-  onVotar,
 }: {
   onEnviar: (texto: string) => void;
   onEscribiendo: () => void;
-  puedeVotar: boolean;
-  onVotar: () => void;
 }) {
   const [valor, setValor] = useState("");
   const enviar = () => {
@@ -197,18 +174,6 @@ function Compositor({
           placeholder="Escribile al agente para corregirlo o pedirle algo…"
           className="min-w-0 flex-1 rounded-lg border border-linea bg-panel-alto px-3.5 py-2.5 text-[14px] text-tinta placeholder:text-tinta-baja focus:border-linea-viva focus:outline-none"
         />
-        <button
-          onClick={onVotar}
-          disabled={!puedeVotar}
-          title={
-            puedeVotar
-              ? "Poner los dos últimos pedidos a votación"
-              : "Hacen falta pedidos de dos personas distintas"
-          }
-          className="shrink-0 rounded-lg border border-linea px-3 py-2.5 text-[12px] text-tinta-media transition-colors hover:border-voto/50 hover:text-voto disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-linea disabled:hover:text-tinta-media"
-        >
-          Votar
-        </button>
         <button
           onClick={enviar}
           disabled={!valor.trim()}

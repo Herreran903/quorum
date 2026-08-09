@@ -21,7 +21,7 @@ import type {
 import { canalDeSala } from "./protocolo";
 import { apodo } from "./apodo";
 import { useIdentidad } from "./useIdentidad";
-import { AgenteChat, ganadoraDe, nuevoId, type VistaAgente } from "./agente-chat";
+import { AgenteChat, VENTANA_VOTACION_MS, ganadoraDe, nuevoId, type VistaAgente } from "./agente-chat";
 import type { Intervencion } from "./modelo-turno";
 import {
   PRESENCIA_VACIA,
@@ -59,6 +59,8 @@ export interface EstadoChat {
   trozos: Map<string, TrozoArtefacto[]>;
   votaciones: Votacion[];
   votos: VotoEnChat[];
+  /** ids de instrucciones (mensajes humanos) que su autor retiró */
+  retiros: Set<string>;
 }
 
 export const VACIO: EstadoChat = {
@@ -69,6 +71,7 @@ export const VACIO: EstadoChat = {
   trozos: new Map(),
   votaciones: [],
   votos: [],
+  retiros: new Set(),
 };
 
 export function reducir(estado: EstadoChat, sobre: Sobre): EstadoChat {
@@ -109,6 +112,22 @@ export function reducir(estado: EstadoChat, sobre: Sobre): EstadoChat {
       if (i >= 0) votos[i] = nuevo;
       else votos.push(nuevo);
       return { ...estado, votos };
+    }
+
+    case "retiro": {
+      const { instruccionId } = c.retiro;
+      if (estado.retiros.has(instruccionId)) return estado;
+      const original = estado.mensajes.find((m) => m.id === instruccionId);
+      // Solo el propio autor retira su pedido, y solo si el agente todavía
+      // no lo aplicó — lo ya incorporado no se puede desandar retroactivo.
+      if (!original || original.deAgente || original.emisor !== sobre.emisor) return estado;
+      const yaAplicada = estado.mensajes.some(
+        (m) => m.deAgente && m.atendio?.includes(instruccionId),
+      );
+      if (yaAplicada) return estado;
+      const retiros = new Set(estado.retiros);
+      retiros.add(instruccionId);
+      return { ...estado, retiros };
     }
 
     default:
@@ -208,6 +227,17 @@ function derivarPerfil(estado: EstadoChat, presencia: Presencia): (id: string) =
 export const VENTANA_CONDUCCION_MS = 45_000;
 
 /**
+ * Cuánto se sigue ignorando la señal de "escribiendo" de alguien después de
+ * que mandó un mensaje.
+ *
+ * El transporte no apaga esa señal al instante — Portal la expira del lado
+ * del cliente, no bien "enviar" (~5s, fuera de nuestro control) — así que sin
+ * esto la burbuja de "escribiendo" sigue un rato aunque el mensaje ya esté en
+ * el chat.
+ */
+const MARGEN_POST_ENVIO_MS = 1500;
+
+/**
  * Quién está conduciendo al agente, derivado del canal.
  *
  * No hay latido ni mensaje de "yo conduzco": el conductor ES quien publicó lo
@@ -229,14 +259,14 @@ export function derivarConductor(estado: EstadoChat, ahora: number): string | un
   return undefined;
 }
 
-function derivarInstrucciones(estado: EstadoChat): Instruccion[] {
+export function derivarInstrucciones(estado: EstadoChat): Instruccion[] {
   const atendidos = new Set<string>();
   for (const m of estado.mensajes) {
     if (!m.deAgente) continue;
     for (const id of m.atendio ?? []) atendidos.add(id);
   }
   return estado.mensajes
-    .filter((m) => !m.deAgente)
+    .filter((m) => !m.deAgente && !estado.retiros.has(m.id))
     .map((m) => ({
       id: m.id,
       emisor: m.emisor,
@@ -244,6 +274,31 @@ function derivarInstrucciones(estado: EstadoChat): Instruccion[] {
       at: m.at,
       aplicada: atendidos.has(m.id),
     }));
+}
+
+/**
+ * El pedido que le toca al agente ahora: el más viejo sin atender, y nada
+ * más. El resto queda pausado —visible en el consolidado, cancelable con el
+ * retiro— hasta que le llegue el turno. Así dos pedidos que se pisan nunca
+ * se procesan juntos: gana el que llegó primero.
+ */
+export function pendienteActivo(instrucciones: Instruccion[]): Instruccion | undefined {
+  return instrucciones
+    .filter((i) => !i.aplicada)
+    .reduce<Instruccion | undefined>((vieja, i) => (!vieja || i.at < vieja.at ? i : vieja), undefined);
+}
+
+/** Las opciones de una votación cuya petición original no fue retirada. */
+function opcionesVivas(v: Votacion, estado: EstadoChat): OpcionVoto[] {
+  return v.opciones.filter((o) => !estado.retiros.has(o.id));
+}
+
+/**
+ * Si ya no queda más de una opción viva, la votación no tiene nada que
+ * dirimir: no hace falta esperar el reloj para darla por resuelta.
+ */
+function estaResuelta(v: Votacion, estado: EstadoChat, ahora: number): boolean {
+  return ahora >= v.cierraEn || opcionesVivas(v, estado).length <= 1;
 }
 
 function contar(estado: EstadoChat, v: Votacion): Record<string, number> {
@@ -268,10 +323,14 @@ export interface Resuelta {
  */
 function derivarResueltas(estado: EstadoChat, ahora: number): Resuelta[] {
   return estado.votaciones
-    .filter((v) => ahora >= v.cierraEn)
+    .filter((v) => estaResuelta(v, estado, ahora))
     .map((v) => {
       const conteo = contar(estado, v);
-      return { votacion: v, ganadora: ganadoraDe(v, conteo), conteo };
+      // Si a alguien le retiraron TODAS las opciones (los dos lados se
+      // bajaron), no hay entre qué elegir: la primera queda como testigo.
+      const vivas = opcionesVivas(v, estado);
+      const ganadora = ganadoraDe(vivas.length > 0 ? { ...v, opciones: vivas } : v, conteo);
+      return { votacion: v, ganadora, conteo };
     });
 }
 
@@ -288,7 +347,7 @@ function derivarVista(
 ): VistaAgente {
   const perfil = derivarPerfil(estado, presencia);
   const instrucciones = derivarInstrucciones(estado);
-  const votacionAbierta = estado.votaciones.find((v) => ahora < v.cierraEn);
+  const votacionAbierta = estado.votaciones.find((v) => !estaResuelta(v, estado, ahora));
   const conductor = derivarConductor(estado, ahora);
 
   // El modelo ve los nombres reales: así puede decir "le agrego lo que pidió
@@ -300,21 +359,14 @@ function derivarVista(
     deAgente: Boolean(m.deAgente),
   }));
 
-  const humanos = estado.mensajes.filter((m) => !m.deAgente);
-  const ultimo = humanos.at(-1);
-  const anterior = [...humanos].reverse().find((m) => ultimo && m.emisor !== ultimo.emisor);
-  const corto = (m: MensajeEnChat) => ({
-    id: m.id,
-    autor: perfil(m.emisor).nombre,
-    emisor: m.emisor,
-    texto: m.texto,
-    at: m.at,
-  });
+  // Solo el más viejo sin atender: los que se pisan quedan pausados hasta
+  // que le toque el turno a cada uno. Ver `pendienteActivo`.
+  const activo = pendienteActivo(instrucciones);
 
   return {
     tarea: estado.tarea ?? "",
     conversacion,
-    pendientes: instrucciones.filter((i) => !i.aplicada).map((i) => i.id),
+    pendientes: activo ? [activo.id] : [],
     decisiones: derivarResueltas(estado, ahora).map(textoDecision),
     artefacto: armarArtefacto(estado.trozos),
     votacionAbierta,
@@ -323,7 +375,6 @@ function derivarVista(
     // `alguienEscribe` en transporte.ts.
     escribiendo: alguienEscribe(presencia),
     debeCeder: Boolean(conductor && yo && conductor !== yo),
-    ultimoPar: ultimo && anterior ? { a: corto(anterior), b: corto(ultimo) } : undefined,
   };
 }
 
@@ -395,7 +446,10 @@ export interface UseChat {
   pausar: () => void;
   enviar: (texto: string) => void;
   votar: (votacionId: string, opcionId: string) => void;
+  /** abre una votación a mano; hoy no hay ningún disparador automático que la use */
   ponerAVotacion: (motivo: string, opciones: { id: string; texto: string; propuestaPor?: string }[]) => void;
+  /** retira una petición propia; solo si el agente no la aplicó todavía */
+  retirarPeticion: (instruccionId: string) => void;
   avisarEscribiendo: () => void;
 }
 
@@ -448,10 +502,11 @@ export function useChat(idSala: string): UseChat {
 
   const instrucciones = useMemo(() => derivarInstrucciones(estado), [estado]);
 
-  const votacionAbierta = useMemo(
-    () => estado.votaciones.find((v) => ahora < v.cierraEn),
-    [estado.votaciones, ahora],
-  );
+  const votacionAbierta = useMemo(() => {
+    const v = estado.votaciones.find((vv) => !estaResuelta(vv, estado, ahora));
+    // La UI solo debe ofrecer las opciones vivas: la retirada ya no se vota.
+    return v ? { ...v, opciones: opcionesVivas(v, estado) } : undefined;
+  }, [estado, ahora]);
 
   const conteo = useMemo(
     () => (votacionAbierta ? contar(estado, votacionAbierta) : {}),
@@ -479,10 +534,24 @@ export function useChat(idSala: string): UseChat {
     return lista.sort((a, b) => a.at - b.at);
   }, [estado.mensajes, resueltas]);
 
-  const tecleando = useMemo(
-    () => presencia.espectadores.filter((e) => !e.soyYo && e.escribiendo).map((e) => e.id),
-    [presencia],
-  );
+  const tecleando = useMemo(() => {
+    const ultimoMensaje = new Map<string, number>();
+    for (const m of estado.mensajes) {
+      if (m.deAgente) continue;
+      ultimoMensaje.set(m.emisor, m.at);
+    }
+    return presencia.espectadores
+      .filter((e) => {
+        if (e.soyYo || !e.escribiendo) return false;
+        // El transporte puede tardar unos segundos en apagar la señal de
+        // tecleo — Portal la expira en el cliente, no al toque. Si esta
+        // persona ya mandó el mensaje, para quien mira ya "dejó de escribir",
+        // así que no esperamos a que el transporte se entere.
+        const ultimo = ultimoMensaje.get(e.id);
+        return ultimo === undefined || ahora - ultimo > MARGEN_POST_ENVIO_MS;
+      })
+      .map((e) => e.id);
+  }, [presencia, estado.mensajes, ahora]);
 
   const conductor = useMemo(() => derivarConductor(estado, ahora), [estado, ahora]);
   const otroConduce = Boolean(conductor && yo && conductor !== yo);
@@ -640,8 +709,14 @@ export function useChat(idSala: string): UseChat {
         // cuando quien lo escribió ya no esté conectado. Ver `Mensaje.autor`.
         mensaje: { id: nuevoId(), texto: t, autor: identidad.nombre },
       });
+      // Si el agente se había dado por terminado (`turno.fin`), un pedido
+      // nuevo lo tiene que revivir solo — si no, queda pendiente para
+      // siempre esperando que alguien note el botón "Retomar" y lo apriete.
+      // `arrancarAgente` ya es un no-op si sigue corriendo o si lo conduce
+      // otra pestaña.
+      arrancarAgente();
     },
-    [identidad.nombre],
+    [identidad.nombre, arrancarAgente],
   );
 
   const votar = useCallback((votacionId: string, opcionId: string) => {
@@ -652,11 +727,15 @@ export function useChat(idSala: string): UseChat {
     (motivo: string, opciones: { id: string; texto: string; propuestaPor?: string }[]) => {
       void transporteRef.current?.publicar({
         tipo: "votacion",
-        votacion: { id: nuevoId(), motivo, opciones, cierraEn: Date.now() + 20_000 },
+        votacion: { id: nuevoId(), motivo, opciones, cierraEn: Date.now() + VENTANA_VOTACION_MS },
       });
     },
     [],
   );
+
+  const retirarPeticion = useCallback((instruccionId: string) => {
+    void transporteRef.current?.publicar({ tipo: "retiro", retiro: { instruccionId } });
+  }, []);
 
   const avisarEscribiendo = useCallback(() => {
     transporteRef.current?.escribiendo();
@@ -690,6 +769,7 @@ export function useChat(idSala: string): UseChat {
     enviar,
     votar,
     ponerAVotacion,
+    retirarPeticion,
     avisarEscribiendo,
   };
 }

@@ -259,9 +259,14 @@ function Balanza() {
 export function Consolidado({
   instrucciones,
   perfil,
+  yo,
+  onEliminar,
 }: {
   instrucciones: Instruccion[];
   perfil: (id: string) => Perfil;
+  /** para saber cuáles pedidos son míos: solo esos se pueden eliminar */
+  yo: string | undefined;
+  onEliminar: (instruccionId: string) => void;
 }) {
   const porPersona = new Map<string, Instruccion[]>();
   for (const i of instrucciones) {
@@ -309,6 +314,15 @@ export function Consolidado({
                       {i.aplicada ? <Tilde /> : <Reloj />}
                     </span>
                     <span className="min-w-0 flex-1">{i.texto}</span>
+                    {!i.aplicada && i.emisor === yo && (
+                      <button
+                        onClick={() => onEliminar(i.id)}
+                        title="Eliminar este pedido"
+                        className="shrink-0 text-voto transition-opacity hover:opacity-70"
+                      >
+                        <IconoEliminar />
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -325,6 +339,14 @@ function Reloj() {
     <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
       <circle cx="8" cy="8" r="6.2" />
       <path d="M8 4.6V8l2.4 1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconoEliminar() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2">
+      <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" strokeLinecap="round" />
     </svg>
   );
 }

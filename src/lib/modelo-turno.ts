@@ -194,33 +194,6 @@ Respondé SOLO con JSON:
 {"mensaje":"...","actividad":"...","atendio":[],"artefacto":{"tipo":"codigo","titulo":"...","lenguaje":"...","contenido":"..."},"fin":false}`;
 }
 
-/** Detecta si dos pedidos se contradicen. Es lo que dispara la votación. */
-export function construirPromptConflicto(a: string, b: string): string {
-  return `Dos personas del mismo equipo le pidieron cosas distintas al mismo agente:
-
-A: "${a}"
-B: "${b}"
-
-¿Se contradicen, de modo que hacer una impide hacer la otra?
-
-Respondé SOLO con JSON:
-{"conflicto":true,"motivo":"frase corta que explique el choque"}
-o
-{"conflicto":false,"motivo":""}`;
-}
-
-export interface Conflicto {
-  conflicto: boolean;
-  motivo: string;
-}
-
-export function sanearConflicto(crudo: unknown): Conflicto {
-  if (!crudo || typeof crudo !== "object") return { conflicto: false, motivo: "" };
-  const o = crudo as Record<string, unknown>;
-  const motivo = typeof o.motivo === "string" ? o.motivo.trim().slice(0, 120) : "";
-  return { conflicto: o.conflicto === true && motivo.length > 0, motivo };
-}
-
 /** Con `format: json` la respuesta debería ser JSON puro, pero a veces trae prosa alrededor. */
 export function extraerJson(texto: string): unknown {
   try {
