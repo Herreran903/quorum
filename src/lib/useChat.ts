@@ -166,6 +166,14 @@ export interface Instruccion {
   at: number;
   /** el agente ya la incorporó en algún turno */
   aplicada: boolean;
+  /**
+   * El equipo la descartó votando: perdió contra otra que la contradecía.
+   *
+   * No es lo mismo que retirada (eso lo hace su autor) ni que aplicada. Sigue
+   * a la vista —la sala decidió algo y tiene que verse— pero el agente no la
+   * vuelve a tocar.
+   */
+  descartada: boolean;
 }
 
 // ------------------------------------------------------------- derivaciones
@@ -259,12 +267,29 @@ export function derivarConductor(estado: EstadoChat, ahora: number): string | un
   return undefined;
 }
 
-export function derivarInstrucciones(estado: EstadoChat): Instruccion[] {
+export function derivarInstrucciones(estado: EstadoChat, ahora: number): Instruccion[] {
   const atendidos = new Set<string>();
   for (const m of estado.mensajes) {
     if (!m.deAgente) continue;
     for (const id of m.atendio ?? []) atendidos.add(id);
   }
+
+  /**
+   * Lo que perdió una votación deja de ser un pedido vivo.
+   *
+   * Sin esto la votación era decorativa: el agente aplicaba la ganadora y, un
+   * turno después, la perdedora seguía siendo el pedido más viejo sin atender
+   * y también la aplicaba — pisando justo lo que el equipo acababa de elegir.
+   * El par ya está en `#paresRevisados`, así que ni siquiera se volvía a
+   * votar: la decisión se deshacía sola y en silencio.
+   */
+  const descartadas = new Set<string>();
+  for (const r of derivarResueltas(estado, ahora)) {
+    for (const o of r.votacion.opciones) {
+      if (o.id !== r.ganadora.id) descartadas.add(o.id);
+    }
+  }
+
   return estado.mensajes
     .filter((m) => !m.deAgente && !estado.retiros.has(m.id))
     .map((m) => ({
@@ -273,6 +298,7 @@ export function derivarInstrucciones(estado: EstadoChat): Instruccion[] {
       texto: m.texto,
       at: m.at,
       aplicada: atendidos.has(m.id),
+      descartada: descartadas.has(m.id),
     }));
 }
 
@@ -284,7 +310,7 @@ export function derivarInstrucciones(estado: EstadoChat): Instruccion[] {
  */
 export function pendienteActivo(instrucciones: Instruccion[]): Instruccion | undefined {
   return instrucciones
-    .filter((i) => !i.aplicada)
+    .filter((i) => !i.aplicada && !i.descartada)
     .reduce<Instruccion | undefined>((vieja, i) => (!vieja || i.at < vieja.at ? i : vieja), undefined);
 }
 
@@ -346,7 +372,7 @@ function derivarVista(
   yo: string | undefined,
 ): VistaAgente {
   const perfil = derivarPerfil(estado, presencia);
-  const instrucciones = derivarInstrucciones(estado);
+  const instrucciones = derivarInstrucciones(estado, ahora);
   const votacionAbierta = estado.votaciones.find((v) => !estaResuelta(v, estado, ahora));
   const conductor = derivarConductor(estado, ahora);
 
@@ -505,7 +531,7 @@ export function useChat(idSala: string): UseChat {
 
   const perfil = useMemo(() => derivarPerfil(estado, presencia), [estado, presencia]);
 
-  const instrucciones = useMemo(() => derivarInstrucciones(estado), [estado]);
+  const instrucciones = useMemo(() => derivarInstrucciones(estado, ahora), [estado, ahora]);
 
   const votacionAbierta = useMemo(() => {
     const v = estado.votaciones.find((vv) => !estaResuelta(vv, estado, ahora));
@@ -630,7 +656,16 @@ export function useChat(idSala: string): UseChat {
     yoRef.current = yo;
   }, [yo]);
 
+  /**
+   * "Pausar" es una orden, no un estado técnico.
+   *
+   * Sin esto, el despertador de más abajo revive al agente en cuanto entra un
+   * pedido y el botón de pausa deja de significar nada.
+   */
+  const pausadoAMano = useRef(false);
+
   const arrancarAgente = useCallback((forzar = false) => {
+    pausadoAMano.current = false;
     const t = transporteRef.current;
     // El guardia mira si está CORRIENDO, no si existe: un agente que dio la
     // tarea por terminada sigue en la ref, y con `if (agenteRef.current)`
@@ -687,6 +722,35 @@ export function useChat(idSala: string): UseChat {
     setConduzco(true);
   }, []);
 
+  /**
+   * Un pedido que llega después de que el agente se dio por terminado tiene
+   * que despertarlo, lo haya escrito quien lo haya escrito.
+   *
+   * El agujero que esto tapa: `enviar` revive al agente SOLO en la pestaña de
+   * quien escribió, y ahí `arrancarAgente` se frena si conduce otro. O sea
+   * que si el agente cerró la tarea conduciendo Ana y el pedido nuevo lo hace
+   * Beto, la pestaña de Beto no puede arrancar (conduce Ana) y la de Ana no
+   * se entera de nada: el pedido queda colgado hasta que alguien note el
+   * botón "Retomar". En una demo eso se ve como un agente que ignora a la
+   * gente.
+   *
+   * Revive el conductor —o cualquiera si ya no hay— y una sola vez por
+   * pedido: si el modelo insiste en cerrar sin atenderlo, se queda quieto en
+   * vez de rearrancar en bucle contra la API.
+   */
+  const revividoPor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (pausadoAMano.current || agenteRef.current?.corriendo) return;
+    const activo = pendienteActivo(instrucciones);
+    if (!activo || revividoPor.current === activo.id) return;
+
+    const conductor = derivarConductor(estado, Date.now());
+    if (conductor && conductor !== yo) return;
+
+    revividoPor.current = activo.id;
+    arrancarAgente();
+  }, [instrucciones, estado, yo, arrancarAgente]);
+
   const empezar = useCallback(
     (tarea: string) => {
       const texto = tarea.trim();
@@ -698,6 +762,7 @@ export function useChat(idSala: string): UseChat {
   );
 
   const pausar = useCallback(() => {
+    pausadoAMano.current = true;
     agenteRef.current?.detener();
     agenteRef.current = null;
     setConduzco(false);

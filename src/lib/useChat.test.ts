@@ -129,9 +129,60 @@ describe("reducir — retiro", () => {
   });
 });
 
+describe("lo que pierde una votación deja de ser un pedido vivo", () => {
+  /** Ana y Beto piden cosas que chocan; se vota y gana Beto. */
+  function salaVotada(ahora: number) {
+    const estado = aplicar([
+      sobre({ tipo: "mensaje", mensaje: { id: "m1", texto: "con descuentos" } }, "ana", 1000),
+      sobre({ tipo: "mensaje", mensaje: { id: "m2", texto: "precio plano" } }, "beto", 1100),
+      sobre(
+        {
+          tipo: "votacion",
+          votacion: {
+            id: "v1",
+            motivo: "chocan",
+            opciones: [
+              { id: "m1", texto: "con descuentos" },
+              { id: "m2", texto: "precio plano" },
+            ],
+            // ya cerrada para el reloj que le pasemos
+            cierraEn: 2000,
+          },
+        },
+        "ana",
+        1200,
+      ),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "beto", 1300),
+      sobre({ tipo: "voto", voto: { votacionId: "v1", opcionId: "m2" } }, "carla", 1400),
+    ]);
+    return derivarInstrucciones(estado, ahora);
+  }
+
+  it("la perdedora queda descartada y la ganadora sigue pendiente", () => {
+    const is = salaVotada(3000);
+    expect(is.find((i) => i.id === "m1")?.descartada).toBe(true);
+    expect(is.find((i) => i.id === "m2")?.descartada).toBe(false);
+  });
+
+  /**
+   * El bug que esto cierra: el agente aplicaba la ganadora y, al turno
+   * siguiente, la PERDEDORA volvía a ser el pedido más viejo sin atender —
+   * así que también la aplicaba, deshaciendo en silencio lo que el equipo
+   * acababa de votar.
+   */
+  it("el agente no vuelve a tomar la perdedora: le toca la ganadora", () => {
+    expect(pendienteActivo(salaVotada(3000))?.id).toBe("m2");
+  });
+
+  it("mientras la votación sigue abierta, nada se descarta", () => {
+    const is = salaVotada(1500);
+    expect(is.every((i) => !i.descartada)).toBe(true);
+  });
+});
+
 describe("pendienteActivo", () => {
-  function activoDe(estado: EstadoChat) {
-    return pendienteActivo(derivarInstrucciones(estado));
+  function activoDe(estado: EstadoChat, ahora = 1_000_000) {
+    return pendienteActivo(derivarInstrucciones(estado, ahora));
   }
 
   it("sin pedidos no hay nada activo", () => {

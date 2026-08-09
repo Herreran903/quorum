@@ -280,7 +280,9 @@ export function Consolidado({
         Lo que pidió el equipo
         {instrucciones.length > 0 && (
           <span className="ml-auto font-normal text-tinta-baja">
-            {instrucciones.filter((i) => i.aplicada).length}/{instrucciones.length} aplicado
+            {/* lo descartado por votación no cuenta: ya no está en juego */}
+            {instrucciones.filter((i) => i.aplicada).length}/
+            {instrucciones.filter((i) => !i.descartada).length} aplicado
           </span>
         )}
       </Rotulo>
@@ -306,15 +308,25 @@ export function Consolidado({
                 {suyas.map((i) => (
                   <li
                     key={i.id}
+                    title={i.descartada ? "El equipo eligió la otra opción" : undefined}
                     className={`flex gap-2 rounded py-1 text-[13px] leading-snug ${
-                      i.aplicada ? "sala-aplicada text-tinta-media" : "text-tinta"
+                      i.descartada
+                        ? "text-tinta-baja line-through decoration-tinta-baja/50"
+                        : i.aplicada
+                          ? "sala-aplicada text-tinta-media"
+                          : "text-tinta"
                     }`}
                   >
-                    <span className={i.aplicada ? "text-acento" : "text-tinta-baja"}>
-                      {i.aplicada ? <Tilde /> : <Reloj />}
+                    <span
+                      className={
+                        i.descartada ? "text-voto" : i.aplicada ? "text-acento" : "text-tinta-baja"
+                      }
+                    >
+                      {i.descartada ? <IconoDescartada /> : i.aplicada ? <Tilde /> : <Reloj />}
                     </span>
                     <span className="min-w-0 flex-1">{i.texto}</span>
-                    {!i.aplicada && i.emisor === yo && (
+                    {/* lo que perdió la votación ya no es de nadie: no se retira */}
+                    {!i.aplicada && !i.descartada && i.emisor === yo && (
                       <button
                         onClick={() => onEliminar(i.id)}
                         title="Eliminar este pedido"
@@ -339,6 +351,16 @@ function Reloj() {
     <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
       <circle cx="8" cy="8" r="6.2" />
       <path d="M8 4.6V8l2.4 1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Lo que perdió una votación: descartado por el equipo, no por su autor. */
+function IconoDescartada() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M5.4 5.4l5.2 5.2" strokeLinecap="round" />
     </svg>
   );
 }
