@@ -212,9 +212,15 @@ export class AgenteChat {
        * lo detenía: volvía igual, lo publicaba y lo daba por aplicado.
        */
       const ahora = this.#ver();
-      if (ahora.votacionAbierta) return;
+      if (ahora.votacionAbierta || ahora.debeCeder) return;
+
+      // Se descarta el turno solo si el pedido que se estaba trabajando dejó
+      // de existir. Exigirle además al modelo que lo reclamara en `atendio`
+      // era demasiado: cuando no lo nombraba —cosa que pasa— el agente se
+      // tragaba su propio turno y se quedaba mudo sin motivo.
+      const trabajado = v.pendientes[0];
+      if (trabajado && !ahora.pendientes.includes(trabajado)) return;
       const seguianVivos = turno.atendio.filter((id) => ahora.pendientes.includes(id));
-      if (v.pendientes.length > 0 && seguianVivos.length === 0) return;
 
       await this.#transporte.publicar({
         tipo: "mensaje",

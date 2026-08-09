@@ -239,6 +239,11 @@ export class TransportePortal implements Transporte {
   #drenarStore(): void {
     if (this.#cerrado) return;
     for (const msg of this.#canal.messages) {
+      // El SDK mete el mensaje propio en el store ANTES de que el servidor lo
+      // acepte (`status: "pending"`). Si se reparte ese eco y el envío falla,
+      // el emisor ve un mensaje que nadie más recibió y que nada retracta:
+      // el reducer no sabe deshacer. Se espera al acuse.
+      if (msg.status === "pending") continue;
       if (this.#vistos.has(msg.id)) continue;
       const sobre = aSobre(msg);
       if (!sobre) continue;

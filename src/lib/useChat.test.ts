@@ -7,6 +7,7 @@ import {
   derivarConductor,
   derivarInstrucciones,
   pendienteActivo,
+  pendientesVivos,
   reducir,
   type EstadoChat,
 } from "./useChat";
@@ -177,6 +178,27 @@ describe("lo que pierde una votación deja de ser un pedido vivo", () => {
   it("mientras la votación sigue abierta, nada se descarta", () => {
     const is = salaVotada(1500);
     expect(is.every((i) => !i.descartada)).toBe(true);
+  });
+
+  /**
+   * El agente usa las dos puntas de la misma cola: la cabeza es lo que
+   * aplica, y la cola entera es lo que compara para detectar choques. Cuando
+   * cada una filtraba por su lado se desincronizaron, y la perdedora —que no
+   * puede volverse "aplicada" ni retirarse— quedaba de cabeza para siempre:
+   * el detector comparaba TODO contra un pedido que la sala ya había
+   * rechazado, y hasta podía abrir una votación para reelegirlo.
+   */
+  it("la perdedora tampoco encabeza la cola que mira el detector de choques", () => {
+    const vivos = pendientesVivos(salaVotada(3000));
+    expect(vivos.map((i) => i.id)).not.toContain("m1");
+    expect(vivos[0]?.id).toBe("m2");
+  });
+
+  it("la cabeza de la cola es SIEMPRE el pedido activo", () => {
+    for (const ahora of [1500, 3000]) {
+      const is = salaVotada(ahora);
+      expect(pendientesVivos(is)[0]?.id).toBe(pendienteActivo(is)?.id);
+    }
   });
 });
 

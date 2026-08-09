@@ -26,7 +26,10 @@ export function Panel({ idSala }: { idSala: string }) {
 
 function Sala({ idSala }: { idSala: string }) {
   const s = useChat(idSala);
-  const scroll = useAutoScroll(s.items.length + (s.pensando ? 1 : 0) + s.tecleando.length);
+  // Clave compuesta, no una suma: cuando el agente publica su mensaje deja de
+  // "pensar" en el mismo render, el +1 y el −1 se anulaban y el chat no bajaba
+  // justo con el mensaje que importa.
+  const scroll = useAutoScroll(`${s.items.length}:${s.pensando ? 1 : 0}:${s.tecleando.length}`);
 
   // `bloqueado` es terminal: Portal rechazó la conexión y no va a reintentar.
   // Merece una pantalla propia — si no, la sala se queda en blanco sin decir
@@ -34,6 +37,15 @@ function Sala({ idSala }: { idSala: string }) {
   // del cliente no coinciden.
   if (s.conexion === "bloqueado") {
     return <Bloqueada />;
+  }
+
+  // Mientras la conexión no trajo el historial no se sabe si la sala está
+  // vacía o llena. Sin este guardia, quien entra por el link ve un instante
+  // la pantalla de "creá una tarea" —como si la sala fuera nueva— y recién
+  // después aparece todo. Es el mismo blanco que usa la puerta de Clerk, así
+  // que la transición no se nota.
+  if (!s.tarea && s.conexion === "conectando") {
+    return <main className="sala-raiz" aria-busy="true" />;
   }
 
   if (!s.tarea) {
@@ -103,7 +115,9 @@ function Sala({ idSala }: { idSala: string }) {
               </p>
             )}
 
-            {!s.conduzco && !s.pensando && s.mensajes.length === 0 && (
+            {/* Si el agente lo lleva otra pestaña, no está en pausa: está
+                arrancando allá. Pedir "Retomar" ahí invita a pisarse. */}
+            {!s.conduzco && !s.otroConduce && !s.pensando && s.mensajes.length === 0 && (
               <p className="px-5 py-6 text-[13px] text-tinta-baja">
                 La sesión está en pausa. Dale a <b className="text-tinta-media">Retomar</b> para que
                 el agente siga.

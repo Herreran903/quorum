@@ -303,15 +303,28 @@ export function derivarInstrucciones(estado: EstadoChat, ahora: number): Instruc
 }
 
 /**
- * El pedido que le toca al agente ahora: el más viejo sin atender, y nada
- * más. El resto queda pausado —visible en el consolidado, cancelable con el
- * retiro— hasta que le llegue el turno. Así dos pedidos que se pisan nunca
- * se procesan juntos: gana el que llegó primero.
+ * La cola de pedidos que el agente todavía puede tomar, del más viejo al más
+ * nuevo. UNA sola definición de "vivo", a propósito.
+ *
+ * El agente usa las dos puntas de esto: la cabeza es el pedido que va a
+ * aplicar (`pendienteActivo`) y la cola entera es lo que mira para detectar
+ * choques. Cuando cada uno filtraba por su lado, se desincronizaron: la
+ * perdedora de una votación salía de una lista pero no de la otra, y el
+ * detector terminó comparando todo contra un pedido que la sala ya había
+ * rechazado. Derivar ambas de acá lo vuelve imposible.
+ *
+ * El resto queda pausado —visible en el consolidado, cancelable con el
+ * retiro— hasta que le llegue el turno: dos pedidos que se pisan nunca se
+ * procesan juntos, gana el que llegó primero.
  */
-export function pendienteActivo(instrucciones: Instruccion[]): Instruccion | undefined {
+export function pendientesVivos(instrucciones: Instruccion[]): Instruccion[] {
   return instrucciones
     .filter((i) => !i.aplicada && !i.descartada)
-    .reduce<Instruccion | undefined>((vieja, i) => (!vieja || i.at < vieja.at ? i : vieja), undefined);
+    .sort((a, b) => a.at - b.at);
+}
+
+export function pendienteActivo(instrucciones: Instruccion[]): Instruccion | undefined {
+  return pendientesVivos(instrucciones)[0];
 }
 
 /** Las opciones de una votación cuya petición original no fue retirada. */
@@ -378,16 +391,21 @@ function derivarVista(
 
   // El modelo ve los nombres reales: así puede decir "le agrego lo que pidió
   // Nicolás" en vez de referirse a un id.
-  const conversacion: Intervencion[] = estado.mensajes.map((m) => ({
-    id: m.id,
-    autor: m.deAgente ? "agente" : perfil(m.emisor).nombre,
-    texto: m.texto,
-    deAgente: Boolean(m.deAgente),
-  }));
+  // Lo retirado no se le cuenta al modelo: si lo sigue leyendo en la
+  // conversación, lo aplica igual aunque su autor lo haya dado de baja.
+  const conversacion: Intervencion[] = estado.mensajes
+    .filter((m) => !estado.retiros.has(m.id))
+    .map((m) => ({
+      id: m.id,
+      autor: m.deAgente ? "agente" : perfil(m.emisor).nombre,
+      texto: m.texto,
+      deAgente: Boolean(m.deAgente),
+    }));
 
-  // Solo el más viejo sin atender: los que se pisan quedan pausados hasta
-  // que le toque el turno a cada uno. Ver `pendienteActivo`.
-  const activo = pendienteActivo(instrucciones);
+  // Una sola cola para las dos cosas: la cabeza es lo que el agente aplica,
+  // el resto es lo que mira para detectar choques. Ver `pendientesVivos`.
+  const vivos = pendientesVivos(instrucciones);
+  const activo = vivos[0];
 
   return {
     tarea: estado.tarea ?? "",
@@ -395,9 +413,12 @@ function derivarVista(
     pendientes: activo ? [activo.id] : [],
     // La cola completa, con autor: es lo que deja ver si el que sigue
     // contradice al que se está por aplicar. Ver `#quizasAbrirVotacion`.
-    enEspera: instrucciones
-      .filter((i) => !i.aplicada)
-      .map((i) => ({ id: i.id, emisor: i.emisor, autor: perfil(i.emisor).nombre, texto: i.texto })),
+    enEspera: vivos.map((i) => ({
+      id: i.id,
+      emisor: i.emisor,
+      autor: perfil(i.emisor).nombre,
+      texto: i.texto,
+    })),
     decisiones: derivarResueltas(estado, ahora).map(textoDecision),
     artefacto: armarArtefacto(estado.trozos),
     votacionAbierta,

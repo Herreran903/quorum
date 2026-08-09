@@ -64,7 +64,14 @@ function PuertaClerk({ children }: { children: React.ReactNode }) {
   // Mientras Clerk resuelve la sesión no se decide nada: mostrar la puerta
   // acá haría parpadear el login a quien ya está adentro.
   if (!isLoaded) {
-    return <main className="sala-raiz" aria-busy="true" />;
+    // El cascarón va con una señal de vida: una pantalla negra y muda de
+    // varios segundos —lo que tarda Clerk— se lee como una app rota, y es lo
+    // primero que ve quien abre el link.
+    return (
+      <main className="sala-raiz flex min-h-dvh items-center justify-center px-4" aria-busy="true">
+        <p className="text-[13px] text-tinta-baja">Entrando a la sala…</p>
+      </main>
+    );
   }
 
   if (isSignedIn) return <>{children}</>;
